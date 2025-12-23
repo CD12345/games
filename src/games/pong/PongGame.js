@@ -71,6 +71,14 @@ export class PongGame extends GameEngine {
                     }
                 }
             });
+
+            onMessage('forfeit_request', (data) => {
+                if (this.state.round.phase === 'gameover') {
+                    return;
+                }
+                const forfeiting = data?.by === 'p2' ? 'p2' : 'p1';
+                this.applyForfeit(forfeiting);
+            });
         }
     }
 
@@ -253,10 +261,37 @@ export class PongGame extends GameEngine {
         this.state = getInitialState();
         this.resetBall('p1');
         this.gameOverNotified = false;
+        this.state.round.forfeitBy = null;
 
         if (this.isHost) {
             this.network.sendState(this.state);
         }
+    }
+
+    applyForfeit(forfeitingPlayer) {
+        const winner = forfeitingPlayer === 'p1' ? 'p2' : 'p1';
+        this.state.round.phase = 'gameover';
+        this.state.round.winner = winner;
+        this.state.round.forfeitBy = forfeitingPlayer;
+
+        if (this.isHost) {
+            this.network.sendState(this.state);
+        }
+
+        this.checkGameOver();
+    }
+
+    forfeit() {
+        if (this.state.round.phase === 'gameover') {
+            return;
+        }
+
+        if (this.isHost) {
+            this.applyForfeit(this.playerId);
+            return;
+        }
+
+        sendMessage('forfeit_request', { by: this.playerId });
     }
 
     requestRematch() {
@@ -276,7 +311,10 @@ export class PongGame extends GameEngine {
             if (!this.gameOverNotified) {
                 this.gameOverNotified = true;
                 if (this.onGameOver) {
-                    this.onGameOver(this.state.round.winner);
+                    this.onGameOver({
+                        winnerId: this.state.round.winner,
+                        forfeitedBy: this.state.round.forfeitBy || null
+                    });
                 }
             }
             return;
@@ -341,6 +379,7 @@ export class PongGame extends GameEngine {
 
         if (this.isHost) {
             offMessage('rematch_request');
+            offMessage('forfeit_request');
         }
     }
 }
