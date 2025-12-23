@@ -31,16 +31,34 @@ export function initPeer(customId = null) {
             return;
         }
 
-        // Use free PeerJS cloud server with public STUN servers
+        // Use free PeerJS cloud server with STUN/TURN servers
         const options = {
             debug: 2, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
             config: {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' }
+                    // Free TURN servers from Metered.ca OpenRelay
+                    {
+                        urls: 'turn:a.relay.metered.ca:80',
+                        username: 'e8dd65b92f0a135494406347',
+                        credential: 'xJONPdSvyLYwvT/M'
+                    },
+                    {
+                        urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+                        username: 'e8dd65b92f0a135494406347',
+                        credential: 'xJONPdSvyLYwvT/M'
+                    },
+                    {
+                        urls: 'turn:a.relay.metered.ca:443',
+                        username: 'e8dd65b92f0a135494406347',
+                        credential: 'xJONPdSvyLYwvT/M'
+                    },
+                    {
+                        urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+                        username: 'e8dd65b92f0a135494406347',
+                        credential: 'xJONPdSvyLYwvT/M'
+                    }
                 ]
             }
         };
