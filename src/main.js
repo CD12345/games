@@ -49,7 +49,9 @@ const elements = {
     playerList: document.getElementById('player-list'),
     btnStartGame: document.getElementById('btn-start-game'),
     loadingMessage: document.getElementById('loading-message'),
-    btnJoinOffer: document.getElementById('btn-join-offer')
+    btnJoinOffer: document.getElementById('btn-join-offer'),
+    namePanel: document.getElementById('name-panel'),
+    playerName: document.getElementById('player-name')
 };
 
 // State
@@ -61,6 +63,75 @@ let playersUnsubscribe = null;
 let gameUnsubscribe = null;
 let pendingOffer = null;
 let sessionLinkReady = false;
+let playerName = '';
+
+const NAME_SCREENS = new Set(['mainMenu', 'joinScreen']);
+const ADJECTIVES = [
+    'Brave', 'Calm', 'Clever', 'Daring', 'Fierce', 'Gentle', 'Happy', 'Jolly',
+    'Kind', 'Lucky', 'Mighty', 'Nimble', 'Proud', 'Quick', 'Quiet', 'Silly',
+    'Smart', 'Swift', 'Witty', 'Zany'
+];
+const ANIMALS = [
+    'Badger', 'Bear', 'Bison', 'Cat', 'Cobra', 'Deer', 'Dolphin', 'Eagle',
+    'Falcon', 'Fox', 'Koala', 'Lion', 'Otter', 'Panda', 'Rabbit', 'Raven',
+    'Shark', 'Tiger', 'Wolf', 'Yak'
+];
+
+function getCookie(name) {
+    const prefix = `${name}=`;
+    const parts = document.cookie.split(';');
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (trimmed.startsWith(prefix)) {
+            return decodeURIComponent(trimmed.slice(prefix.length));
+        }
+    }
+    return '';
+}
+
+function setCookie(name, value, days = 365) {
+    const maxAge = days * 24 * 60 * 60;
+    document.cookie = `${name}=${encodeURIComponent(value)}; max-age=${maxAge}; path=/`;
+}
+
+function generateName() {
+    const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+    const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+    const digits = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    return `${adjective}${animal}${digits}`;
+}
+
+function normalizeName(value) {
+    return value.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+}
+
+function ensurePlayerName() {
+    let stored = getCookie('playerName');
+    if (!stored) {
+        stored = generateName();
+        setCookie('playerName', stored);
+    }
+    playerName = stored;
+    if (elements.playerName) {
+        elements.playerName.value = stored;
+    }
+}
+
+function getEffectivePlayerName() {
+    if (!playerName) {
+        playerName = generateName();
+        setCookie('playerName', playerName);
+        if (elements.playerName) {
+            elements.playerName.value = playerName;
+        }
+    }
+    return playerName;
+}
+
+function updateNamePanelVisibility(screenName) {
+    if (!elements.namePanel) return;
+    elements.namePanel.classList.toggle('hidden', !NAME_SCREENS.has(screenName));
+}
 
 // Debug mode state
 let debugModeHoldTimer = null;
@@ -182,6 +253,7 @@ function showScreen(screenName) {
     Object.values(screens).forEach(screen => screen.classList.remove('active'));
     screens[screenName].classList.add('active');
     currentScreen = screenName;
+    updateNamePanelVisibility(screenName);
 }
 
 function showLoading(message = 'Loading...') {
@@ -250,6 +322,7 @@ async function setupSessionLink() {
 function init() {
     // No backend initialization needed for P2P
     showScreen('mainMenu');
+    ensurePlayerName();
     setupEventListeners();
     setupSessionLink();
 
@@ -262,6 +335,26 @@ function init() {
 // Event listeners
 function setupEventListeners() {
     setupDebugModeActivation();
+    if (elements.playerName) {
+        elements.playerName.addEventListener('input', (e) => {
+            const cleaned = normalizeName(e.target.value);
+            e.target.value = cleaned;
+            playerName = cleaned;
+            if (cleaned) {
+                setCookie('playerName', cleaned);
+            }
+        });
+
+        elements.playerName.addEventListener('blur', (e) => {
+            const cleaned = normalizeName(e.target.value);
+            if (!cleaned) {
+                const generated = generateName();
+                playerName = generated;
+                setCookie('playerName', generated);
+                e.target.value = generated;
+            }
+        });
+    }
     // Main menu
     elements.btnCreate.addEventListener('click', () => {
         populateGameList();
@@ -339,7 +432,7 @@ async function handleCreateGame(gameType, options = {}) {
     showLoading('Creating game...');
 
     try {
-        const result = await createGame(gameType);
+        const result = await createGame(gameType, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
         enterLobby(gameType);
@@ -361,7 +454,7 @@ async function handleJoinGame() {
     showLoading('Joining game...');
 
     try {
-        const result = await joinGame(code);
+        const result = await joinGame(code, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
         enterLobby(result.gameType);
@@ -388,7 +481,7 @@ async function handleJoinOffer() {
     showLoading('Joining game...');
 
     try {
-        const result = await joinGame(offerCode);
+        const result = await joinGame(offerCode, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
         enterLobby(result.gameType);

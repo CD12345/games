@@ -20,7 +20,7 @@ export class PongRenderer {
     }
 
     render(state, playerNumber) {
-        const { ball, paddles, scores, round, paddleWidth } = state;
+        const { ball, paddles, scores, round, paddleWidth, playerNames } = state;
         const config = PONG_CONFIG;
         const w = this.canvas.width;
         const h = this.canvas.height;
@@ -55,7 +55,10 @@ export class PongRenderer {
             const remaining = Math.ceil((config.game.launchDelay - elapsed) / 1000);
             this.drawCountdown(remaining);
         } else if (round.phase === 'scored') {
-            const scorer = round.lastScorer === 'p1' ? 'Player 1' : 'Player 2';
+            const nameMap = playerNames || {};
+            const scorer = round.lastScorer === 'p1'
+                ? (nameMap.p1 || 'Player 1')
+                : (nameMap.p2 || 'Player 2');
             const isYou = (round.lastScorer === 'p1' && playerNumber === 1) ||
                           (round.lastScorer === 'p2' && playerNumber === 2);
             this.drawMessage(isYou ? 'You scored!' : `${scorer} scored!`);

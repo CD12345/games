@@ -137,11 +137,11 @@ function showError(message) {
     gameoverOverlay.classList.add('hidden');
 }
 
-function showGameOver(result, playerNumber) {
+function showGameOver(result, playerNumber, playerNames) {
+    const getName = (id) => playerNames?.[id] || (id === 'p1' ? 'Player 1' : 'Player 2');
     if (result?.forfeitedBy) {
-        const forfeitingPlayer = result.forfeitedBy === 'p1' ? 1 : 2;
         gameoverTitle.textContent = 'Game Over';
-        gameoverMessage.textContent = `Game forfeited by Player ${forfeitingPlayer}.`;
+        gameoverMessage.textContent = `Game forfeited by ${getName(result.forfeitedBy)}.`;
         gameoverOverlay.classList.remove('hidden');
         return;
     }
@@ -209,11 +209,16 @@ async function init() {
         // Set up responsive canvas
         const gameConfig = GameRegistry.getGame(gameType);
         const aspectRatio = gameConfig?.id === 'pong' ? PONG_CONFIG.aspectRatio : 9 / 16;
-        responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio);
+        const container = document.getElementById('game-container');
+        responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio, container);
 
         // Create game instance
         gameInstance = new GameClass(canvas, gameCode, isHost, playerNumber);
-        gameInstance.onGameOver = (result) => showGameOver(result, playerNumber);
+        gameInstance.onGameOver = (result) => showGameOver(
+            result,
+            playerNumber,
+            result?.playerNames || gameInstance?.state?.playerNames
+        );
         gameInstance.onGameReset = hideGameOver;
         if (typeof gameInstance.forfeit === 'function') {
             btnForfeit.classList.remove('hidden');
