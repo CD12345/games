@@ -51,7 +51,8 @@ const elements = {
     loadingMessage: document.getElementById('loading-message'),
     btnJoinOffer: document.getElementById('btn-join-offer'),
     namePanel: document.getElementById('name-panel'),
-    playerName: document.getElementById('player-name')
+    playerName: document.getElementById('player-name'),
+    menuCodeDisplay: document.getElementById('menu-code-display')
 };
 
 // State
@@ -131,6 +132,21 @@ function getEffectivePlayerName() {
 function updateNamePanelVisibility(screenName) {
     if (!elements.namePanel) return;
     elements.namePanel.classList.toggle('hidden', !NAME_SCREENS.has(screenName));
+}
+
+function setMenuCodeDisplay(code, options = {}) {
+    if (!elements.menuCodeDisplay) return;
+    const display = code || '';
+    elements.menuCodeDisplay.textContent = display;
+    if (options.updateUrl !== false) {
+        const url = new URL(window.location.href);
+        if (display) {
+            url.searchParams.set('code', display);
+        } else {
+            url.searchParams.delete('code');
+        }
+        window.history.replaceState({}, '', url.toString());
+    }
 }
 
 // Debug mode state
@@ -321,10 +337,33 @@ async function setupSessionLink() {
 // Initialize app
 function init() {
     // No backend initialization needed for P2P
+    if (window.location.pathname !== '/') {
+        const url = new URL(window.location.href);
+        url.pathname = '/';
+        window.history.replaceState({}, '', url.toString());
+    }
     showScreen('mainMenu');
     ensurePlayerName();
     setupEventListeners();
     setupSessionLink();
+
+    const params = new URLSearchParams(window.location.search);
+    const urlCode = params.get('code');
+    if (urlCode) {
+        setMenuCodeDisplay(urlCode.toUpperCase(), { updateUrl: false });
+    } else {
+        const storedSession = sessionStorage.getItem('gameSession');
+        if (storedSession) {
+            try {
+                const parsed = JSON.parse(storedSession);
+                if (parsed?.code) {
+                setMenuCodeDisplay(parsed.code, { updateUrl: false });
+                }
+            } catch (error) {
+            setMenuCodeDisplay('', { updateUrl: false });
+            }
+        }
+    }
 
     const existingOffer = loadPendingOffer();
     if (existingOffer) {
@@ -374,12 +413,15 @@ function setupEventListeners() {
     elements.btnBackLobby.addEventListener('click', () => handleLeaveLobby(true));
 
     // Join screen
-    elements.joinCode.addEventListener('input', (e) => {
-        const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
-        e.target.value = value;
-        elements.btnJoinSubmit.disabled = value.length !== 4;
-        elements.joinError.textContent = '';
-    });
+        elements.joinCode.addEventListener('input', (e) => {
+            const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+            e.target.value = value;
+            elements.btnJoinSubmit.disabled = value.length !== 4;
+            elements.joinError.textContent = '';
+            if (value.length === 4) {
+                setMenuCodeDisplay(value);
+            }
+        });
 
     elements.btnJoinSubmit.addEventListener('click', handleJoinGame);
 
@@ -435,6 +477,7 @@ async function handleCreateGame(gameType, options = {}) {
         const result = await createGame(gameType, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
+        setMenuCodeDisplay(currentGameCode);
         enterLobby(gameType);
         clearJoinOffer();
 
@@ -457,6 +500,7 @@ async function handleJoinGame() {
         const result = await joinGame(code, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
+        setMenuCodeDisplay(currentGameCode);
         enterLobby(result.gameType);
         clearJoinOffer();
     } catch (error) {
@@ -484,6 +528,7 @@ async function handleJoinOffer() {
         const result = await joinGame(offerCode, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
+        setMenuCodeDisplay(currentGameCode);
         enterLobby(result.gameType);
         clearJoinOffer();
     } catch (error) {
@@ -499,6 +544,7 @@ function enterLobby(gameType) {
     const game = GameRegistry.getGame(gameType);
     elements.lobbyGameName.textContent = `${game.icon} ${game.name}`;
     elements.lobbyCode.textContent = currentGameCode;
+    setMenuCodeDisplay(currentGameCode);
     storeSession();
 
     const isLinked = sessionStorage.getItem('sessionLinked') === 'true';
@@ -642,6 +688,7 @@ function handleLeaveLobby(notifyPeer = true) {
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
+    setMenuCodeDisplay('');
     showScreen('mainMenu');
 }
 

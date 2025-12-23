@@ -29,6 +29,7 @@ const gameoverTitle = document.getElementById('gameover-title');
 const gameoverMessage = document.getElementById('gameover-message');
 const btnPlayAgain = document.getElementById('btn-play-again');
 const btnBackMenu = document.getElementById('btn-back-menu');
+const gameCodeDisplay = document.getElementById('game-code-display');
 
 // State
 let gameCode = null;
@@ -44,6 +45,25 @@ function getURLParams() {
         host: params.get('host'),
         gameType: params.get('game')
     };
+}
+
+function forceRootPath(code) {
+    const url = new URL(window.location.href);
+    let updated = false;
+    if (url.pathname !== '/') {
+        url.pathname = '/';
+        updated = true;
+    }
+    if (code) {
+        const upperCode = code.toUpperCase();
+        if (url.searchParams.get('code') !== upperCode) {
+            url.searchParams.set('code', upperCode);
+            updated = true;
+        }
+    }
+    if (updated) {
+        window.history.replaceState({}, '', url.toString());
+    }
 }
 
 function getStoredSession() {
@@ -185,6 +205,12 @@ async function init() {
     if (!gameCode) {
         showError('No game code provided.');
         return;
+    }
+
+    forceRootPath(gameCode);
+
+    if (gameCodeDisplay) {
+        gameCodeDisplay.textContent = gameCode;
     }
 
     if (!gameType) {
