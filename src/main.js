@@ -18,6 +18,7 @@ import {
     isConnected
 } from './core/peer.js';
 import { GameRegistry } from './games/GameRegistry.js';
+import { getBasePath, storeEntryPath } from './ui/url.js';
 
 // Import and register games
 import './games/pong/index.js';
@@ -34,6 +35,7 @@ const screens = {
 const elements = {
     btnCreate: document.getElementById('btn-create'),
     btnJoin: document.getElementById('btn-join'),
+    btnNewSession: document.getElementById('btn-new-session'),
     btnBackJoin: document.getElementById('btn-back-join'),
     btnBackSelect: document.getElementById('btn-back-select'),
     btnBackLobby: document.getElementById('btn-back-lobby'),
@@ -93,6 +95,10 @@ function getCookie(name) {
 function setCookie(name, value, days = 365) {
     const maxAge = days * 24 * 60 * 60;
     document.cookie = `${name}=${encodeURIComponent(value)}; max-age=${maxAge}; path=/`;
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function generateName() {
@@ -248,11 +254,18 @@ function clearStoredSession() {
     sessionStorage.removeItem('pendingOffer');
 }
 
+function clearPairInfo() {
+    sessionStorage.removeItem('pairCode');
+    sessionStorage.removeItem('pairIsHost');
+    sessionStorage.removeItem('sessionLinked');
+    sessionLinkReady = false;
+}
+
 function buildGameUrl() {
     const code = encodeURIComponent(currentGameCode || '');
     const host = encodeURIComponent(String(isHost));
     const game = encodeURIComponent(currentGameType || '');
-    return `game.html?code=${code}&host=${host}&game=${game}`;
+    return `${getBasePath()}game.html?code=${code}&host=${host}&game=${game}`;
 }
 
 function getPairInfo() {
@@ -317,6 +330,72 @@ function clearJoinOffer() {
     elements.btnJoinOffer.classList.add('hidden');
 }
 
+async function requestHostHandoff(code) {
+    if (!sessionLinkReady || !isConnected()) {
+        return false;
+    }
+
+    return new Promise((resolve) => {
+        let settled = false;
+        const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            offMessage('handoff_ack');
+        };
+
+        const timer = setTimeout(() => {
+            cleanup();
+            resolve(false);
+        }, 2000);
+
+        onMessage('handoff_ack', () => {
+            clearTimeout(timer);
+            cleanup();
+            resolve(true);
+        });
+
+        sendMessage('handoff_host', { code });
+    });
+}
+
+async function createGameWithRetries(gameType, name, preferredCode) {
+    const attempts = preferredCode ? 3 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            return await createGame(gameType, name, { code: preferredCode });
+        } catch (error) {
+            const isInUse = error?.message?.toLowerCase().includes('already in use');
+            if (preferredCode && isInUse && attempt < attempts - 1) {
+                await delay(1000);
+                continue;
+            }
+            throw error;
+        }
+    }
+    return null;
+}
+
+function handleNewSession() {
+    clearPairInfo();
+    leaveGame();
+    clearStoredSession();
+    clearJoinOffer();
+    currentGameCode = null;
+    currentGameType = null;
+    isHost = false;
+    setMenuCodeDisplay('');
+    if (elements.joinCode) {
+        elements.joinCode.value = '';
+    }
+    if (elements.joinError) {
+        elements.joinError.textContent = '';
+    }
+    if (elements.btnJoinSubmit) {
+        elements.btnJoinSubmit.disabled = true;
+    }
+    showScreen('mainMenu');
+}
+
 async function setupSessionLink() {
     const pairInfo = getPairInfo();
     if (!pairInfo) {
@@ -355,11 +434,33 @@ async function setupSessionLink() {
         handleLeaveLobby(false);
         showScreen('mainMenu');
     });
+
+    onMessage('handoff_host', (data) => {
+        const pairInfo = getPairInfo();
+        if (!pairInfo?.isHost) {
+            return;
+        }
+        const reuseCode = (data?.code || sessionStorage.getItem('pairCode') || '')
+            .toUpperCase()
+            .replace(/[^A-Z]/g, '')
+            .slice(0, 4);
+        if (reuseCode) {
+            sessionStorage.setItem('pairCode', reuseCode);
+        }
+        sessionStorage.setItem('pairIsHost', 'false');
+        sessionStorage.setItem('sessionLinked', 'true');
+        sendMessage('handoff_ack', {});
+        sessionLinkReady = false;
+        setTimeout(() => {
+            leaveGame();
+        }, 50);
+    });
 }
 
 // Initialize app
 function init() {
     // No backend initialization needed for P2P
+    storeEntryPath();
     showScreen('mainMenu');
     ensurePlayerName();
     setupEventListeners();
@@ -426,6 +527,8 @@ function setupEventListeners() {
         showScreen('joinScreen');
     });
 
+    elements.btnNewSession.addEventListener('click', handleNewSession);
+
     // Back buttons
     elements.btnBackJoin.addEventListener('click', () => showScreen('mainMenu'));
     elements.btnBackSelect.addEventListener('click', () => showScreen('mainMenu'));
@@ -482,20 +585,25 @@ function populateGameList() {
 // Handle game creation
 async function handleCreateGame(gameType, options = {}) {
     const pairInfo = getPairInfo();
+    let preferredCode = null;
     if (!options.fromRequest && pairInfo && !pairInfo.isHost) {
-        if (sessionLinkReady) {
-            showLoading('Waiting for host...');
-            sendMessage('game_request', { gameType });
-            return;
+        const reuseCode = pairInfo.code || currentGameCode || getKnownCode();
+        if (reuseCode && reuseCode.length === 4) {
+            preferredCode = reuseCode;
+            await requestHostHandoff(reuseCode);
         }
-        alert('Host is not connected yet. Try again in a moment.');
-        return;
+        sessionLinkReady = false;
+        leaveGame();
     }
 
     showLoading('Creating game...');
 
     try {
-        const result = await createGame(gameType, getEffectivePlayerName());
+        if (!preferredCode) {
+            const reuseCode = getKnownCode();
+            preferredCode = reuseCode && reuseCode.length === 4 ? reuseCode : null;
+        }
+        const result = await createGameWithRetries(gameType, getEffectivePlayerName(), preferredCode);
         currentGameCode = result.code;
         isHost = result.isHost;
         setMenuCodeDisplay(currentGameCode);
