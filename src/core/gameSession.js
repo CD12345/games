@@ -21,7 +21,7 @@ let playerUpdateCallback = null;
 let gameStatusCallback = null;
 
 // Create a new game session (as host)
-export async function createGame(gameType) {
+export async function createGame(gameType, playerName) {
     const gameConfig = GameRegistry.getGame(gameType);
     if (!gameConfig) {
         throw new Error(`Unknown game type: ${gameType}`);
@@ -61,6 +61,7 @@ export async function createGame(gameType) {
         }
     }
 
+    const hostName = playerName || 'Player 1';
     currentSession = {
         code,
         gameType,
@@ -68,7 +69,7 @@ export async function createGame(gameType) {
         status: 'waiting',
         players: {
             host: {
-                name: 'Player 1',
+                name: hostName,
                 connected: true,
                 isHost: true
             }
@@ -89,7 +90,7 @@ export async function createGame(gameType) {
 }
 
 // Join an existing game (as guest)
-export async function joinGame(code) {
+export async function joinGame(code, playerName) {
     code = normalizeCode(code);
     if (!isValidCodeFormat(code)) {
         throw new Error('Invalid code format');
@@ -102,7 +103,7 @@ export async function joinGame(code) {
     await connectToPeer(code);
 
     // Request game info from host
-    sendMessage('join_request', { name: 'Player 2' });
+    sendMessage('join_request', { name: playerName || 'Player 2' });
 
     // Wait for acceptance
     return new Promise((resolve, reject) => {

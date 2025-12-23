@@ -165,6 +165,39 @@ h2 {
     margin-top: auto;
 }
 
+/* Name panel */
+.name-panel {
+    width: 100%;
+    margin-top: auto;
+    padding-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.name-panel label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+#player-name {
+    width: 100%;
+    max-width: 280px;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    border: 2px solid var(--bg-card);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 1rem;
+    text-align: center;
+}
+
+#player-name:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
 /* Code Input */
 .code-input-container {
     margin: 2rem 0;

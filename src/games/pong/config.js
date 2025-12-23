@@ -46,6 +46,10 @@ export function getInitialState() {
             p2: 0.5
         },
         paddleWidth: PONG_CONFIG.paddle.width,
+        playerNames: {
+            p1: 'Player 1',
+            p2: 'Player 2'
+        },
         scores: {
             p1: 0,
             p2: 0

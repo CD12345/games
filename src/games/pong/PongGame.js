@@ -9,6 +9,22 @@ import { PongRenderer } from './PongRenderer.js';
 import { debugLog, debugSetValue } from '../../ui/DebugOverlay.js';
 import { PONG_CONFIG, getInitialState } from './config.js';
 
+function getCookie(name) {
+    const prefix = `${name}=`;
+    const parts = document.cookie.split(';');
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (trimmed.startsWith(prefix)) {
+            return decodeURIComponent(trimmed.slice(prefix.length));
+        }
+    }
+    return '';
+}
+
+function normalizeName(value) {
+    return (value || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+}
+
 export class PongGame extends GameEngine {
     constructor(canvas, gameCode, isHost, playerNumber) {
         super(canvas);
@@ -21,6 +37,7 @@ export class PongGame extends GameEngine {
 
         // Game state
         this.state = getInitialState();
+        this.localName = normalizeName(getCookie('playerName')) || `Player ${this.playerNumber}`;
 
         // Components
         this.input = new InputManager(canvas);
@@ -64,6 +81,25 @@ export class PongGame extends GameEngine {
         // Start network sync
         this.network.start();
         debugLog('Network sync started');
+
+        if (!this.state.playerNames) {
+            this.state.playerNames = { p1: 'Player 1', p2: 'Player 2' };
+        }
+        this.state.playerNames[this.playerId] = this.localName;
+
+        onMessage('player_name', (data) => {
+            const playerId = data?.playerId === 'p1' ? 'p1' : 'p2';
+            const name = normalizeName(data?.name);
+            if (!name) {
+                return;
+            }
+            this.state.playerNames[playerId] = name;
+            if (this.isHost) {
+                this.network.sendState(this.state);
+            }
+        });
+
+        sendMessage('player_name', { playerId: this.playerId, name: this.localName });
 
         this.proximity.onDistanceChange = (distance) => {
             this.debugDistanceFeet = distance;
@@ -293,7 +329,11 @@ export class PongGame extends GameEngine {
     }
 
     resetMatch() {
+        const playerNames = this.state.playerNames;
         this.state = getInitialState();
+        if (playerNames) {
+            this.state.playerNames = playerNames;
+        }
         this.resetBall('p1');
         this.gameOverNotified = false;
         this.state.round.forfeitBy = null;
@@ -348,7 +388,8 @@ export class PongGame extends GameEngine {
                 if (this.onGameOver) {
                     this.onGameOver({
                         winnerId: this.state.round.winner,
-                        forfeitedBy: this.state.round.forfeitBy || null
+                        forfeitedBy: this.state.round.forfeitBy || null,
+                        playerNames: this.state.playerNames
                     });
                 }
             }
@@ -423,5 +464,6 @@ export class PongGame extends GameEngine {
             offMessage('rematch_request');
             offMessage('forfeit_request');
         }
+        offMessage('player_name');
     }
 }
