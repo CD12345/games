@@ -10,8 +10,15 @@
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <div id="game-container">
-        <canvas id="game-canvas"></canvas>
+    <div id="game-shell">
+        <div id="game-bar">
+            <div class="game-bar-title">Party Games</div>
+            <button id="btn-forfeit" class="btn btn-ghost">I give up!</button>
+        </div>
+
+        <div id="game-container">
+            <canvas id="game-canvas"></canvas>
+        </div>
 
         <!-- Connection status overlay -->
         <div id="status-overlay" class="overlay hidden">

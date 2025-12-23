@@ -23,6 +23,7 @@ const statusMessage = document.getElementById('status-message');
 const errorOverlay = document.getElementById('error-overlay');
 const errorMessage = document.getElementById('error-message');
 const btnBackHome = document.getElementById('btn-back-home');
+const btnForfeit = document.getElementById('btn-forfeit');
 const gameoverOverlay = document.getElementById('gameover-overlay');
 const gameoverTitle = document.getElementById('gameover-title');
 const gameoverMessage = document.getElementById('gameover-message');
@@ -136,9 +137,17 @@ function showError(message) {
     gameoverOverlay.classList.add('hidden');
 }
 
-function showGameOver(winnerId, playerNumber) {
-    const isWinner = (winnerId === 'p1' && playerNumber === 1) ||
-        (winnerId === 'p2' && playerNumber === 2);
+function showGameOver(result, playerNumber) {
+    if (result?.forfeitedBy) {
+        const forfeitingPlayer = result.forfeitedBy === 'p1' ? 1 : 2;
+        gameoverTitle.textContent = 'Game Over';
+        gameoverMessage.textContent = `Game forfeited by Player ${forfeitingPlayer}.`;
+        gameoverOverlay.classList.remove('hidden');
+        return;
+    }
+
+    const isWinner = (result?.winnerId === 'p1' && playerNumber === 1) ||
+        (result?.winnerId === 'p2' && playerNumber === 2);
     gameoverTitle.textContent = isWinner ? 'You Win!' : 'You Lose!';
     gameoverMessage.textContent = isWinner ? 'Nice work!' : 'Good game!';
     gameoverOverlay.classList.remove('hidden');
@@ -204,8 +213,14 @@ async function init() {
 
         // Create game instance
         gameInstance = new GameClass(canvas, gameCode, isHost, playerNumber);
-        gameInstance.onGameOver = (winnerId) => showGameOver(winnerId, playerNumber);
+        gameInstance.onGameOver = (result) => showGameOver(result, playerNumber);
         gameInstance.onGameReset = hideGameOver;
+        if (typeof gameInstance.forfeit === 'function') {
+            btnForfeit.classList.remove('hidden');
+            btnForfeit.disabled = false;
+        } else {
+            btnForfeit.classList.add('hidden');
+        }
 
         // Initialize and start game
         await gameInstance.initialize();
@@ -243,6 +258,17 @@ btnBackHome.addEventListener('click', () => {
 
 btnBackMenu.addEventListener('click', () => {
     returnToMenu(true);
+});
+
+btnForfeit.addEventListener('click', () => {
+    if (!gameInstance) {
+        return;
+    }
+    btnForfeit.disabled = true;
+    gameInstance.forfeit();
+    setTimeout(() => {
+        btnForfeit.disabled = false;
+    }, 1000);
 });
 
 btnPlayAgain.addEventListener('click', () => {
