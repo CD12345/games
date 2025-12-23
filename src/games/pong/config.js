@@ -15,6 +15,9 @@ export const PONG_CONFIG = {
     // Paddle settings
     paddle: {
         width: 0.2,             // Relative to canvas width
+        minWidth: 0.04,         // Minimum width (ball diameter)
+        maxWidth: 1 / 3,        // Maximum width (1/3 screen)
+        halfDistanceFeet: 6,    // Distance at which paddle is half max size
         height: 0.025,          // Relative to canvas height
         offset: 0.03,           // Distance from edge
         speed: 0.03             // Movement speed per frame (for keyboard)
@@ -42,6 +45,7 @@ export function getInitialState() {
             p1: 0.5,            // Y position (0-1)
             p2: 0.5
         },
+        paddleWidth: PONG_CONFIG.paddle.width,
         scores: {
             p1: 0,
             p2: 0

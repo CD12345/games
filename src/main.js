@@ -62,6 +62,66 @@ let gameUnsubscribe = null;
 let pendingOffer = null;
 let sessionLinkReady = false;
 
+// Debug mode state
+let debugModeHoldTimer = null;
+let debugModeIndicator = null;
+
+function isDebugMode() {
+    return sessionStorage.getItem('debugMode') === 'true' ||
+        localStorage.getItem('debugMode') === 'true';
+}
+
+function enableDebugMode() {
+    sessionStorage.setItem('debugMode', 'true');
+    localStorage.setItem('debugMode', 'true');
+    showDebugIndicator();
+}
+
+function showDebugIndicator() {
+    if (debugModeIndicator) return;
+    debugModeIndicator = document.createElement('div');
+    debugModeIndicator.textContent = 'debug mode';
+    debugModeIndicator.style.cssText = `
+        position: fixed;
+        bottom: 8px;
+        right: 8px;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        font-family: monospace;
+        pointer-events: none;
+        z-index: 9999;
+    `;
+    document.body.appendChild(debugModeIndicator);
+}
+
+function setupDebugModeActivation() {
+    if (isDebugMode()) {
+        showDebugIndicator();
+    }
+
+    const startHold = () => {
+        debugModeHoldTimer = setTimeout(() => {
+            if (!isDebugMode()) {
+                enableDebugMode();
+            }
+        }, 5000);
+    };
+
+    const cancelHold = () => {
+        if (debugModeHoldTimer) {
+            clearTimeout(debugModeHoldTimer);
+            debugModeHoldTimer = null;
+        }
+    };
+
+    elements.btnCreate.addEventListener('mousedown', startHold);
+    elements.btnCreate.addEventListener('mouseup', cancelHold);
+    elements.btnCreate.addEventListener('mouseleave', cancelHold);
+    elements.btnCreate.addEventListener('touchstart', startHold);
+    elements.btnCreate.addEventListener('touchend', cancelHold);
+    elements.btnCreate.addEventListener('touchcancel', cancelHold);
+}
+
 function storeSession() {
     if (!currentGameCode || !currentGameType) {
         return;
@@ -201,6 +261,7 @@ function init() {
 
 // Event listeners
 function setupEventListeners() {
+    setupDebugModeActivation();
     // Main menu
     elements.btnCreate.addEventListener('click', () => {
         populateGameList();

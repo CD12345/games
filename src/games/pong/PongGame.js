@@ -3,8 +3,10 @@
 import { GameEngine } from '../../engine/GameEngine.js';
 import { InputManager } from '../../engine/InputManager.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
+import { ProximitySync } from '../../engine/ProximitySync.js';
 import { onMessage, offMessage, sendMessage } from '../../core/peer.js';
 import { PongRenderer } from './PongRenderer.js';
+import { debugLog, debugSetValue } from '../../ui/DebugOverlay.js';
 import { PONG_CONFIG, getInitialState } from './config.js';
 
 export class PongGame extends GameEngine {
@@ -23,6 +25,7 @@ export class PongGame extends GameEngine {
         // Components
         this.input = new InputManager(canvas);
         this.network = new NetworkSync(gameCode, isHost);
+        this.proximity = new ProximitySync(isHost);
         this.renderer = new PongRenderer(canvas);
 
         // Timing
@@ -33,9 +36,14 @@ export class PongGame extends GameEngine {
         this.onGameOver = null;
         this.onGameReset = null;
         this.gameOverNotified = false;
+
+        // Debug values
+        this.proximityAvailable = null;
+        this.debugDistanceFeet = null;
     }
 
     async initialize() {
+        debugLog(`Pong init: ${this.isHost ? 'host' : 'guest'}, player ${this.playerNumber}`);
         // Set up network callbacks
         if (this.isHost) {
             // Host receives guest input
@@ -55,11 +63,28 @@ export class PongGame extends GameEngine {
 
         // Start network sync
         this.network.start();
+        debugLog('Network sync started');
+
+        this.proximity.onDistanceChange = (distance) => {
+            this.debugDistanceFeet = distance;
+            this.state.paddleWidth = this.calculatePaddleWidth(distance);
+        };
+
+        const proximityPromise = this.proximity.start().catch((error) => {
+            debugLog(`Proximity error: ${error?.message || error}`);
+            return false;
+        });
+
+        proximityPromise.then((available) => {
+            this.proximityAvailable = available;
+            debugLog(`Proximity: ${available ? 'available' : 'unavailable'}`);
+        });
 
         // If host, initialize the game state
         if (this.isHost) {
             this.resetBall(this.playerId);
             this.network.sendState(this.state);
+            debugLog('Host initialized state');
         }
 
         if (this.isHost) {
@@ -94,6 +119,15 @@ export class PongGame extends GameEngine {
         }
 
         this.checkGameOver();
+
+        const phaseScore = `${this.state.round.phase} ${this.state.scores.p1}-${this.state.scores.p2}`;
+        let debugValue = phaseScore;
+        if (this.debugDistanceFeet !== null) {
+            debugValue = `${this.debugDistanceFeet.toFixed(1)} ft | ${phaseScore}`;
+        } else if (this.proximityAvailable === false) {
+            debugValue = `no prox | ${phaseScore}`;
+        }
+        debugSetValue(debugValue);
     }
 
     updateGameLogic(deltaTime) {
@@ -163,11 +197,12 @@ export class PongGame extends GameEngine {
     }
 
     checkPaddleCollision(playerId, paddleX, paddleY) {
-        const { ball } = this.state;
+        const { ball, paddleWidth } = this.state;
         const config = PONG_CONFIG;
 
-        const paddleLeft = paddleX - config.paddle.width / 2;
-        const paddleRight = paddleX + config.paddle.width / 2;
+        const currentPaddleWidth = paddleWidth || config.paddle.width;
+        const paddleLeft = paddleX - currentPaddleWidth / 2;
+        const paddleRight = paddleX + currentPaddleWidth / 2;
         const paddleTop = paddleY;
         const paddleBottom = paddleY + config.paddle.height;
 
@@ -200,7 +235,7 @@ export class PongGame extends GameEngine {
             ball.vy = -ball.vy;
 
             // Add horizontal velocity based on where ball hit paddle
-            const hitPos = (ball.x - paddleX) / (config.paddle.width / 2);
+            const hitPos = (ball.x - paddleX) / (currentPaddleWidth / 2);
             ball.vx += hitPos * 0.005;
 
             // Speed up slightly
@@ -334,10 +369,17 @@ export class PongGame extends GameEngine {
         this.renderer.render(renderState, this.playerNumber);
     }
 
+    calculatePaddleWidth(distanceFeet) {
+        const config = PONG_CONFIG.paddle;
+        const width = config.maxWidth * (config.halfDistanceFeet / (config.halfDistanceFeet + distanceFeet));
+        return Math.max(config.minWidth, Math.min(config.maxWidth, width));
+    }
+
     destroy() {
         super.destroy();
         this.input.destroy();
         this.network.stop();
+        this.proximity.stop();
 
         if (this.isHost) {
             offMessage('rematch_request');

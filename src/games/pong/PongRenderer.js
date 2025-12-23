@@ -20,11 +20,12 @@ export class PongRenderer {
     }
 
     render(state, playerNumber) {
-        const { ball, paddles, scores, round } = state;
+        const { ball, paddles, scores, round, paddleWidth } = state;
         const config = PONG_CONFIG;
         const w = this.canvas.width;
         const h = this.canvas.height;
         const flipY = playerNumber === 1;
+        const currentPaddleWidth = paddleWidth || config.paddle.width;
 
         // Clear canvas
         this.ctx.fillStyle = this.colors.background;
@@ -39,8 +40,8 @@ export class PongRenderer {
         const p1Color = playerNumber === 1 ? this.colors.paddle : this.colors.paddleOpponent;
         const p2Color = playerNumber === 2 ? this.colors.paddle : this.colors.paddleOpponent;
 
-        this.drawPaddle(paddles.p1, config.paddle.offset, p1Color, flipY);
-        this.drawPaddle(paddles.p2, 1 - config.paddle.offset - config.paddle.height, p2Color, flipY);
+        this.drawPaddle(paddles.p1, config.paddle.offset, p1Color, flipY, currentPaddleWidth);
+        this.drawPaddle(paddles.p2, 1 - config.paddle.offset - config.paddle.height, p2Color, flipY, currentPaddleWidth);
 
         // Draw ball
         this.drawBall(ball.x, flipY ? 1 - ball.y : ball.y);
@@ -79,19 +80,24 @@ export class PongRenderer {
         this.ctx.setLineDash([]);
     }
 
-    drawPaddle(x, y, color, flipY = false) {
+    drawPaddle(x, y, color, flipY = false, paddleWidth = null) {
         const w = this.canvas.width;
         const h = this.canvas.height;
         const config = PONG_CONFIG;
 
-        const paddleW = config.paddle.width * w;
+        const normalizedWidth = paddleWidth || config.paddle.width;
+        const paddleW = normalizedWidth * w;
         const paddleH = config.paddle.height * h;
         const paddleX = x * w - paddleW / 2;
         const paddleY = (flipY ? 1 - y - config.paddle.height : y) * h;
 
         this.ctx.fillStyle = color;
         this.ctx.beginPath();
-        this.ctx.roundRect(paddleX, paddleY, paddleW, paddleH, 4);
+        if (typeof this.ctx.roundRect === 'function') {
+            this.ctx.roundRect(paddleX, paddleY, paddleW, paddleH, 4);
+        } else {
+            this.ctx.rect(paddleX, paddleY, paddleW, paddleH);
+        }
         this.ctx.fill();
     }
 
