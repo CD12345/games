@@ -3,7 +3,10 @@
     "allow": [
       "Bash(mkdir:*)",
       "WebSearch",
-      "Bash(cmd //c:*)"
+      "Bash(cmd //c:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"Add explicit STUN servers for cross-device WebRTC connections\n\n$\\(cat <<''EOF''\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push)"
     ]
   }
 }
