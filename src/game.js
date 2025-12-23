@@ -54,12 +54,8 @@ function getURLParams() {
 function forceRootPath(code) {
     const url = new URL(window.location.href);
     let updated = false;
-    if (url.pathname !== '/') {
-        url.pathname = '/';
-        updated = true;
-    }
-    if (code) {
-        const upperCode = code.toUpperCase();
+    if (code !== undefined) {
+        const upperCode = (code || '').toUpperCase();
         if (url.searchParams.get('code') !== upperCode) {
             url.searchParams.set('code', upperCode);
             updated = true;
@@ -268,6 +264,7 @@ async function init() {
     const gameType = params.gameType || storedSession?.gameType || null;
 
     if (!gameCode) {
+        forceRootPath('');
         showError('No game code provided.');
         return;
     }

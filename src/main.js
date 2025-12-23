@@ -140,11 +140,7 @@ function setMenuCodeDisplay(code, options = {}) {
     elements.menuCodeDisplay.textContent = display;
     if (options.updateUrl !== false) {
         const url = new URL(window.location.href);
-        if (display) {
-            url.searchParams.set('code', display);
-        } else {
-            url.searchParams.delete('code');
-        }
+        url.searchParams.set('code', display);
         window.history.replaceState({}, '', url.toString());
     }
 }
@@ -364,11 +360,6 @@ async function setupSessionLink() {
 // Initialize app
 function init() {
     // No backend initialization needed for P2P
-    if (window.location.pathname !== '/') {
-        const url = new URL(window.location.href);
-        url.pathname = '/';
-        window.history.replaceState({}, '', url.toString());
-    }
     showScreen('mainMenu');
     ensurePlayerName();
     setupEventListeners();
@@ -376,7 +367,7 @@ function init() {
 
     const params = new URLSearchParams(window.location.search);
     const urlCode = params.get('code');
-    if (urlCode) {
+    if (urlCode !== null) {
         setMenuCodeDisplay(urlCode.toUpperCase(), { updateUrl: false });
     } else {
         const storedSession = sessionStorage.getItem('gameSession');
@@ -384,11 +375,15 @@ function init() {
             try {
                 const parsed = JSON.parse(storedSession);
                 if (parsed?.code) {
-                setMenuCodeDisplay(parsed.code, { updateUrl: false });
+                    setMenuCodeDisplay(parsed.code);
+                } else {
+                    setMenuCodeDisplay('');
                 }
             } catch (error) {
-            setMenuCodeDisplay('', { updateUrl: false });
+                setMenuCodeDisplay('');
             }
+        } else {
+            setMenuCodeDisplay('');
         }
     }
 
@@ -444,6 +439,8 @@ function setupEventListeners() {
         elements.joinError.textContent = '';
         if (value.length === 4) {
             setMenuCodeDisplay(value);
+        } else {
+            setMenuCodeDisplay('');
         }
     });
 
