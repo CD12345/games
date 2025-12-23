@@ -3,6 +3,7 @@
 import { GameEngine } from '../../engine/GameEngine.js';
 import { InputManager } from '../../engine/InputManager.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
+import { onMessage, offMessage, sendMessage } from '../../core/peer.js';
 import { PongRenderer } from './PongRenderer.js';
 import { PONG_CONFIG, getInitialState } from './config.js';
 
@@ -27,6 +28,11 @@ export class PongGame extends GameEngine {
         // Timing
         this.lastInputSync = 0;
         this.inputSyncInterval = 1000 / 60; // 60 updates per second
+
+        // Game over handling
+        this.onGameOver = null;
+        this.onGameReset = null;
+        this.gameOverNotified = false;
     }
 
     async initialize() {
@@ -55,6 +61,17 @@ export class PongGame extends GameEngine {
             this.resetBall(this.playerId);
             this.network.sendState(this.state);
         }
+
+        if (this.isHost) {
+            onMessage('rematch_request', () => {
+                if (this.state.round.phase === 'gameover') {
+                    this.resetMatch();
+                    if (this.onGameReset) {
+                        this.onGameReset();
+                    }
+                }
+            });
+        }
     }
 
     update(deltaTime) {
@@ -75,6 +92,8 @@ export class PongGame extends GameEngine {
             // Guest interpolates
             this.network.updateInterpolation(deltaTime);
         }
+
+        this.checkGameOver();
     }
 
     updateGameLogic(deltaTime) {
@@ -217,15 +236,58 @@ export class PongGame extends GameEngine {
         ball.vy = 0;
 
         if (servingPlayer === 'p1') {
-            ball.y = config.paddle.offset + config.paddle.height / 2;
+            const paddleY = config.paddle.offset;
+            ball.y = paddleY + config.paddle.height + 2*config.ball.radius;
             ball.x = this.state.paddles.p1;
         } else {
-            ball.y = 1 - config.paddle.offset - config.paddle.height / 2;
+            const paddleY = 1 - config.paddle.offset - config.paddle.height;
+            ball.y = paddleY - config.ball.radius;
             ball.x = this.state.paddles.p2;
         }
 
         round.phase = 'countdown';
         round.startTime = Date.now();
+    }
+
+    resetMatch() {
+        this.state = getInitialState();
+        this.resetBall('p1');
+        this.gameOverNotified = false;
+
+        if (this.isHost) {
+            this.network.sendState(this.state);
+        }
+    }
+
+    requestRematch() {
+        if (this.isHost) {
+            this.resetMatch();
+            if (this.onGameReset) {
+                this.onGameReset();
+            }
+            return;
+        }
+
+        sendMessage('rematch_request', {});
+    }
+
+    checkGameOver() {
+        if (this.state.round.phase === 'gameover') {
+            if (!this.gameOverNotified) {
+                this.gameOverNotified = true;
+                if (this.onGameOver) {
+                    this.onGameOver(this.state.round.winner);
+                }
+            }
+            return;
+        }
+
+        if (this.gameOverNotified) {
+            this.gameOverNotified = false;
+            if (this.onGameReset) {
+                this.onGameReset();
+            }
+        }
     }
 
     launchBall() {
@@ -276,5 +338,9 @@ export class PongGame extends GameEngine {
         super.destroy();
         this.input.destroy();
         this.network.stop();
+
+        if (this.isHost) {
+            offMessage('rematch_request');
+        }
     }
 }

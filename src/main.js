@@ -8,6 +8,15 @@ import {
     startGame,
     leaveGame
 } from './core/gameSession.js';
+import {
+    initPeer,
+    waitForConnection,
+    connectToPeer,
+    onMessage,
+    offMessage,
+    sendMessage,
+    isConnected
+} from './core/peer.js';
 import { GameRegistry } from './games/GameRegistry.js';
 
 // Import and register games
@@ -35,9 +44,12 @@ const elements = {
     lobbyGameName: document.getElementById('lobby-game-name'),
     lobbyCode: document.getElementById('lobby-code'),
     btnCopyCode: document.getElementById('btn-copy-code'),
+    codeDisplay: document.querySelector('.code-display'),
+    codeHint: document.querySelector('.code-hint'),
     playerList: document.getElementById('player-list'),
     btnStartGame: document.getElementById('btn-start-game'),
-    loadingMessage: document.getElementById('loading-message')
+    loadingMessage: document.getElementById('loading-message'),
+    btnJoinOffer: document.getElementById('btn-join-offer')
 };
 
 // State
@@ -47,6 +59,63 @@ let currentGameType = null;
 let isHost = false;
 let playersUnsubscribe = null;
 let gameUnsubscribe = null;
+let pendingOffer = null;
+let sessionLinkReady = false;
+
+function storeSession() {
+    if (!currentGameCode || !currentGameType) {
+        return;
+    }
+
+    const payload = {
+        code: currentGameCode,
+        gameType: currentGameType,
+        isHost
+    };
+
+    sessionStorage.setItem('gameSession', JSON.stringify(payload));
+}
+
+function clearStoredSession() {
+    sessionStorage.removeItem('gameSession');
+    sessionStorage.removeItem('pendingOffer');
+}
+
+function buildGameUrl() {
+    const code = encodeURIComponent(currentGameCode || '');
+    const host = encodeURIComponent(String(isHost));
+    const game = encodeURIComponent(currentGameType || '');
+    return `game.html?code=${code}&host=${host}&game=${game}`;
+}
+
+function getPairInfo() {
+    const code = sessionStorage.getItem('pairCode');
+    const role = sessionStorage.getItem('pairIsHost');
+    if (!code || role === null) {
+        return null;
+    }
+    return {
+        code,
+        isHost: role === 'true'
+    };
+}
+
+function storePendingOffer(offer) {
+    pendingOffer = offer;
+    sessionStorage.setItem('pendingOffer', JSON.stringify(offer));
+}
+
+function loadPendingOffer() {
+    const raw = sessionStorage.getItem('pendingOffer');
+    if (!raw) {
+        return null;
+    }
+    try {
+        return JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+}
 
 // Screen management
 function showScreen(screenName) {
@@ -60,11 +129,74 @@ function showLoading(message = 'Loading...') {
     showScreen('loading');
 }
 
+function showJoinOffer(offer) {
+    const game = GameRegistry.getGame(offer.gameType);
+    if (!game) {
+        return;
+    }
+
+    storePendingOffer(offer);
+    elements.btnJoinOffer.textContent = `Join ${game.name}`;
+    elements.btnJoinOffer.classList.remove('hidden');
+}
+
+function clearJoinOffer() {
+    pendingOffer = null;
+    sessionStorage.removeItem('pendingOffer');
+    elements.btnJoinOffer.classList.add('hidden');
+}
+
+async function setupSessionLink() {
+    const pairInfo = getPairInfo();
+    if (!pairInfo) {
+        return;
+    }
+
+    try {
+        if (pairInfo.isHost) {
+            await initPeer(pairInfo.code);
+            await waitForConnection();
+        } else {
+            await initPeer();
+            await connectToPeer(pairInfo.code);
+        }
+        sessionLinkReady = true;
+    } catch (error) {
+        console.warn('Session link failed:', error);
+        sessionLinkReady = false;
+    }
+
+    onMessage('game_offer', (offer) => {
+        if (!offer?.gameType) {
+            return;
+        }
+        showJoinOffer(offer);
+    });
+
+    onMessage('game_request', async (request) => {
+        if (!pairInfo.isHost || !request?.gameType) {
+            return;
+        }
+        await handleCreateGame(request.gameType, { fromRequest: true });
+    });
+
+    onMessage('return_to_menu', () => {
+        handleLeaveLobby(false);
+        showScreen('mainMenu');
+    });
+}
+
 // Initialize app
 function init() {
     // No backend initialization needed for P2P
     showScreen('mainMenu');
     setupEventListeners();
+    setupSessionLink();
+
+    const existingOffer = loadPendingOffer();
+    if (existingOffer) {
+        showJoinOffer(existingOffer);
+    }
 }
 
 // Event listeners
@@ -85,7 +217,7 @@ function setupEventListeners() {
     // Back buttons
     elements.btnBackJoin.addEventListener('click', () => showScreen('mainMenu'));
     elements.btnBackSelect.addEventListener('click', () => showScreen('mainMenu'));
-    elements.btnBackLobby.addEventListener('click', handleLeaveLobby);
+    elements.btnBackLobby.addEventListener('click', () => handleLeaveLobby(true));
 
     // Join screen
     elements.joinCode.addEventListener('input', (e) => {
@@ -107,6 +239,9 @@ function setupEventListeners() {
     // Lobby
     elements.btnCopyCode.addEventListener('click', handleCopyCode);
     elements.btnStartGame.addEventListener('click', handleStartGame);
+
+    // Join offer
+    elements.btnJoinOffer.addEventListener('click', handleJoinOffer);
 }
 
 // Populate game list for selection
@@ -128,7 +263,18 @@ function populateGameList() {
 }
 
 // Handle game creation
-async function handleCreateGame(gameType) {
+async function handleCreateGame(gameType, options = {}) {
+    const pairInfo = getPairInfo();
+    if (!options.fromRequest && pairInfo && !pairInfo.isHost) {
+        if (sessionLinkReady) {
+            showLoading('Waiting for host...');
+            sendMessage('game_request', { gameType });
+            return;
+        }
+        alert('Host is not connected yet. Try again in a moment.');
+        return;
+    }
+
     showLoading('Creating game...');
 
     try {
@@ -136,6 +282,11 @@ async function handleCreateGame(gameType) {
         currentGameCode = result.code;
         isHost = result.isHost;
         enterLobby(gameType);
+        clearJoinOffer();
+
+        if (sessionLinkReady && isConnected()) {
+            sendMessage('game_offer', { gameType, code: currentGameCode });
+        }
     } catch (error) {
         console.error('Create game error:', error);
         showScreen('selectGame');
@@ -153,10 +304,38 @@ async function handleJoinGame() {
         currentGameCode = result.code;
         isHost = result.isHost;
         enterLobby(result.gameType);
+        clearJoinOffer();
     } catch (error) {
         console.error('Join game error:', error);
         showScreen('joinScreen');
         elements.joinError.textContent = error.message;
+    }
+}
+
+async function handleJoinOffer() {
+    if (!pendingOffer) {
+        return;
+    }
+
+    const pairInfo = getPairInfo();
+    const offerCode = pendingOffer?.code || pairInfo?.code;
+    if (!offerCode) {
+        elements.joinError.textContent = 'Session code missing.';
+        return;
+    }
+
+    showLoading('Joining game...');
+
+    try {
+        const result = await joinGame(offerCode);
+        currentGameCode = result.code;
+        isHost = result.isHost;
+        enterLobby(result.gameType);
+        clearJoinOffer();
+    } catch (error) {
+        console.error('Join offer error:', error);
+        showScreen('mainMenu');
+        alert('Failed to join game: ' + error.message);
     }
 }
 
@@ -166,6 +345,18 @@ function enterLobby(gameType) {
     const game = GameRegistry.getGame(gameType);
     elements.lobbyGameName.textContent = `${game.icon} ${game.name}`;
     elements.lobbyCode.textContent = currentGameCode;
+    storeSession();
+
+    const isLinked = sessionStorage.getItem('sessionLinked') === 'true';
+    if (elements.codeDisplay && elements.codeHint) {
+        if (isLinked) {
+            elements.codeDisplay.classList.add('hidden');
+            elements.codeHint.classList.add('hidden');
+        } else {
+            elements.codeDisplay.classList.remove('hidden');
+            elements.codeHint.classList.remove('hidden');
+        }
+    }
 
     // Subscribe to player updates
     if (playersUnsubscribe) playersUnsubscribe();
@@ -176,7 +367,8 @@ function enterLobby(gameType) {
     gameUnsubscribe = subscribeToGame(currentGameCode, (gameData) => {
         if (gameData && gameData.status === 'playing') {
             // Game has started - redirect to game page
-            window.location.href = `game.html?code=${currentGameCode}&host=${isHost}`;
+            storeSession();
+            window.location.href = buildGameUrl();
         }
     });
 
@@ -211,6 +403,12 @@ function updatePlayerList(players) {
 
         if (player.connected) connectedCount++;
     });
+
+    const isLinked = sessionStorage.getItem('sessionLinked') === 'true';
+    if (elements.codeDisplay && elements.codeHint && isLinked) {
+        elements.codeDisplay.classList.add('hidden');
+        elements.codeHint.classList.add('hidden');
+    }
 
     // Update start button
     if (isHost) {
@@ -256,10 +454,11 @@ async function handleStartGame() {
     try {
         elements.btnStartGame.disabled = true;
         elements.btnStartGame.textContent = 'Starting...';
+        storeSession();
         await startGame(currentGameCode);
 
         // Navigate to game page (host also redirects here)
-        window.location.href = `game.html?code=${currentGameCode}&host=${isHost}`;
+        window.location.href = buildGameUrl();
     } catch (error) {
         console.error('Start game error:', error);
         alert('Failed to start game: ' + error.message);
@@ -269,7 +468,7 @@ async function handleStartGame() {
 }
 
 // Leave lobby
-function handleLeaveLobby() {
+function handleLeaveLobby(notifyPeer = true) {
     if (playersUnsubscribe) {
         playersUnsubscribe();
         playersUnsubscribe = null;
@@ -280,7 +479,12 @@ function handleLeaveLobby() {
         gameUnsubscribe = null;
     }
 
+    if (notifyPeer && sessionLinkReady && isConnected()) {
+        sendMessage('return_to_menu', {});
+    }
+
     leaveGame();
+    clearStoredSession();
     currentGameCode = null;
     currentGameType = null;
     isHost = false;

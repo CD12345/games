@@ -55,6 +55,10 @@ body {
     display: flex;
 }
 
+.hidden {
+    display: none !important;
+}
+
 /* Typography */
 h1 {
     font-size: 2.5rem;
@@ -152,6 +156,13 @@ h2 {
     align-items: center;
     margin-top: auto;
     margin-bottom: auto;
+}
+
+.menu-join-offer {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: auto;
 }
 
 /* Code Input */

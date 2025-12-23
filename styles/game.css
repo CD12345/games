@@ -61,7 +61,8 @@ body {
 }
 
 .status-content,
-.error-content {
+.error-content,
+.gameover-content {
     text-align: center;
     padding: 2rem;
 }
@@ -74,6 +75,14 @@ body {
 .error-content p {
     color: var(--text-secondary);
     margin-bottom: 1.5rem;
+}
+
+.gameover-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1rem;
 }
 
 /* Loader */
@@ -106,6 +115,16 @@ body {
 
 .btn:hover {
     background: #ff6b6b;
+}
+
+.btn.btn-secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+}
+
+.btn.btn-secondary:hover {
+    background: rgba(233, 69, 96, 0.15);
 }
 
 /* Prevent pull-to-refresh on mobile */

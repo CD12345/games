@@ -24,6 +24,7 @@ export class PongRenderer {
         const config = PONG_CONFIG;
         const w = this.canvas.width;
         const h = this.canvas.height;
+        const flipY = playerNumber === 1;
 
         // Clear canvas
         this.ctx.fillStyle = this.colors.background;
@@ -38,14 +39,14 @@ export class PongRenderer {
         const p1Color = playerNumber === 1 ? this.colors.paddle : this.colors.paddleOpponent;
         const p2Color = playerNumber === 2 ? this.colors.paddle : this.colors.paddleOpponent;
 
-        this.drawPaddle(paddles.p1, config.paddle.offset, p1Color);
-        this.drawPaddle(paddles.p2, 1 - config.paddle.offset - config.paddle.height, p2Color);
+        this.drawPaddle(paddles.p1, config.paddle.offset, p1Color, flipY);
+        this.drawPaddle(paddles.p2, 1 - config.paddle.offset - config.paddle.height, p2Color, flipY);
 
         // Draw ball
-        this.drawBall(ball.x, ball.y);
+        this.drawBall(ball.x, flipY ? 1 - ball.y : ball.y);
 
         // Draw scores
-        this.drawScores(scores, playerNumber);
+        this.drawScores(scores, playerNumber, flipY);
 
         // Draw countdown or game over
         if (round.phase === 'countdown') {
@@ -78,7 +79,7 @@ export class PongRenderer {
         this.ctx.setLineDash([]);
     }
 
-    drawPaddle(x, y, color) {
+    drawPaddle(x, y, color, flipY = false) {
         const w = this.canvas.width;
         const h = this.canvas.height;
         const config = PONG_CONFIG;
@@ -86,7 +87,7 @@ export class PongRenderer {
         const paddleW = config.paddle.width * w;
         const paddleH = config.paddle.height * h;
         const paddleX = x * w - paddleW / 2;
-        const paddleY = y * h;
+        const paddleY = (flipY ? 1 - y - config.paddle.height : y) * h;
 
         this.ctx.fillStyle = color;
         this.ctx.beginPath();
@@ -111,7 +112,7 @@ export class PongRenderer {
         this.ctx.shadowBlur = 0;
     }
 
-    drawScores(scores, playerNumber) {
+    drawScores(scores, playerNumber, flipY = false) {
         const w = this.canvas.width;
         const h = this.canvas.height;
 
@@ -120,11 +121,13 @@ export class PongRenderer {
 
         // Top score (Player 1's score)
         this.ctx.fillStyle = playerNumber === 1 ? this.colors.paddle : this.colors.paddleOpponent;
-        this.ctx.fillText(scores.p1.toString(), w / 2, h * 0.25);
+        const topScoreY = flipY ? h * 0.75 + 20 : h * 0.25;
+        this.ctx.fillText(scores.p1.toString(), w / 2, topScoreY);
 
         // Bottom score (Player 2's score)
         this.ctx.fillStyle = playerNumber === 2 ? this.colors.paddle : this.colors.paddleOpponent;
-        this.ctx.fillText(scores.p2.toString(), w / 2, h * 0.75 + 20);
+        const bottomScoreY = flipY ? h * 0.25 : h * 0.75 + 20;
+        this.ctx.fillText(scores.p2.toString(), w / 2, bottomScoreY);
     }
 
     drawCountdown(seconds) {
@@ -165,6 +168,6 @@ export class PongRenderer {
         // Sub message
         this.ctx.font = '18px sans-serif';
         this.ctx.fillStyle = this.colors.textDim;
-        this.ctx.fillText('Tap to play again', w / 2, h / 2 + 20);
+        this.ctx.fillText('Game Over', w / 2, h / 2 + 20);
     }
 }

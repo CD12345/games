@@ -11,6 +11,15 @@ let messageHandlers = new Map();
 // Initialize PeerJS with a custom ID (for host) or random ID (for guest)
 export function initPeer(customId = null) {
     return new Promise((resolve, reject) => {
+        if (peer && !peer.destroyed) {
+            if (customId && peer.id && peer.id !== customId) {
+                reject(new Error('Peer already initialized with a different ID.'));
+                return;
+            }
+            resolve(peer.id);
+            return;
+        }
+
         // Use free PeerJS cloud server
         const options = {
             debug: 1 // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
@@ -48,6 +57,11 @@ export function initPeer(customId = null) {
 export function waitForConnection() {
     return new Promise((resolve) => {
         isHost = true;
+
+        if (currentConnection && currentConnection.open) {
+            resolve(currentConnection);
+            return;
+        }
 
         peer.on('connection', (conn) => {
             console.log('Guest connected:', conn.peer);

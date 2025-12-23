@@ -27,26 +27,38 @@ export async function createGame(gameType) {
         throw new Error(`Unknown game type: ${gameType}`);
     }
 
-    // Generate a unique code and use it as the peer ID
-    let code;
+    const existingCode = sessionStorage.getItem('pairCode');
+    const existingHost = sessionStorage.getItem('pairIsHost') === 'true';
+    const sessionLinked = sessionStorage.getItem('sessionLinked') === 'true';
+
+    // Generate a unique code and use it as the peer ID (reuse session code when linked)
+    let code = null;
     let attempts = 0;
 
-    while (attempts < 5) {
-        code = generateCode();
-        try {
-            await initPeer(code);
-            break;
-        } catch (error) {
-            if (error.message.includes('already in use')) {
-                attempts++;
-                continue;
+    if (sessionLinked && existingHost && existingCode) {
+        code = existingCode;
+        await initPeer(code);
+        waitForConnection();
+    } else {
+        while (attempts < 5) {
+            code = generateCode();
+            try {
+                await initPeer(code);
+                // Start listening for incoming connections from guests.
+                waitForConnection();
+                break;
+            } catch (error) {
+                if (error.message.includes('already in use')) {
+                    attempts++;
+                    continue;
+                }
+                throw error;
             }
-            throw error;
         }
-    }
 
-    if (attempts >= 5) {
-        throw new Error('Unable to generate unique code. Try again.');
+        if (attempts >= 5) {
+            throw new Error('Unable to generate unique code. Try again.');
+        }
     }
 
     currentSession = {
@@ -62,6 +74,9 @@ export async function createGame(gameType) {
             }
         }
     };
+
+    sessionStorage.setItem('pairCode', code);
+    sessionStorage.setItem('pairIsHost', 'true');
 
     // Wait for guest to connect
     setupHostListeners();
@@ -110,6 +125,10 @@ export async function joinGame(code) {
                 players: data.players
             };
 
+            sessionStorage.setItem('pairCode', code);
+            sessionStorage.setItem('pairIsHost', 'false');
+            sessionStorage.setItem('sessionLinked', 'true');
+
             setupGuestListeners();
 
             resolve({
@@ -137,6 +156,8 @@ function setupHostListeners() {
             connected: true,
             isHost: false
         };
+
+        sessionStorage.setItem('sessionLinked', 'true');
 
         // Send acceptance with game info
         sendMessage('join_accepted', {

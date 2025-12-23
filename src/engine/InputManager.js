@@ -54,7 +54,7 @@ export class InputManager {
 
     handleMouseMove(e) {
         const rect = this.canvas.getBoundingClientRect();
-        this.paddleY = (e.clientY - rect.top) / rect.height;
+        this.paddleY = (e.clientX - rect.left) / rect.width;
         this.paddleY = Math.max(0, Math.min(1, this.paddleY));
     }
 
@@ -78,7 +78,7 @@ export class InputManager {
 
     updatePositionFromTouch(touch) {
         const rect = this.canvas.getBoundingClientRect();
-        this.paddleY = (touch.clientY - rect.top) / rect.height;
+        this.paddleY = (touch.clientX - rect.left) / rect.width;
         this.paddleY = Math.max(0, Math.min(1, this.paddleY));
     }
 
