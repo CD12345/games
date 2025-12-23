@@ -41,64 +41,54 @@ function clearConnectionHandler() {
     connectionHandler = null;
 }
 
-// Initialize PeerJS with a custom ID (for host) or random ID (for guest)
-export function initPeer(customId = null) {
-    return new Promise((resolve, reject) => {
-        addDebugLog(`initPeer called, customId=${customId || 'none'}`);
+// Metered.ca TURN credentials API
+const METERED_API_URL = 'https://cd12345.metered.live/api/v1/turn/credentials?apiKey=b5093eb1b4d5852abb7fc078a031ed74f4a6';
 
-        if (peer && !peer.destroyed) {
-            if (customId && peer.id && peer.id !== customId) {
-                addDebugLog('ERROR: Peer already initialized with different ID');
-                reject(new Error('Peer already initialized with a different ID.'));
-                return;
-            }
-            addDebugLog(`Reusing existing peer: ${peer.id}`);
-            resolve(peer.id);
-            return;
+// Fetch TURN credentials from Metered.ca
+async function fetchTurnCredentials() {
+    try {
+        addDebugLog('Fetching TURN credentials from Metered...');
+        const response = await fetch(METERED_API_URL);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
+        const iceServers = await response.json();
+        addDebugLog(`Got ${iceServers.length} ICE servers from Metered`);
+        return iceServers;
+    } catch (error) {
+        addDebugLog(`Failed to fetch TURN credentials: ${error.message}`);
+        // Fallback to basic STUN only
+        return [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+        ];
+    }
+}
 
-        // Use free PeerJS cloud server with STUN/TURN servers
-        const options = {
-            debug: 3, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
-            config: {
-                iceServers: [
-                    // Google STUN servers
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    // Cloudflare TURN (free, no auth needed for basic use)
-                    { urls: 'stun:stun.cloudflare.com:3478' },
-                    {
-                        urls: 'turn:turn.cloudflare.com:3478?transport=udp',
-                        username: '',
-                        credential: ''
-                    },
-                    {
-                        urls: 'turn:turn.cloudflare.com:3478?transport=tcp',
-                        username: '',
-                        credential: ''
-                    },
-                    // Open Relay TURN servers (may require signup now)
-                    {
-                        urls: 'turn:openrelay.metered.ca:80',
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    },
-                    {
-                        urls: 'turn:openrelay.metered.ca:443',
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    },
-                    {
-                        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                        username: 'openrelayproject',
-                        credential: 'openrelayproject'
-                    }
-                ]
-            }
-        };
+// Initialize PeerJS with a custom ID (for host) or random ID (for guest)
+export async function initPeer(customId = null) {
+    addDebugLog(`initPeer called, customId=${customId || 'none'}`);
 
-        addDebugLog(`Creating peer with ${options.config.iceServers.length} ICE servers`);
+    if (peer && !peer.destroyed) {
+        if (customId && peer.id && peer.id !== customId) {
+            addDebugLog('ERROR: Peer already initialized with different ID');
+            throw new Error('Peer already initialized with a different ID.');
+        }
+        addDebugLog(`Reusing existing peer: ${peer.id}`);
+        return peer.id;
+    }
 
+    // Fetch TURN credentials from Metered.ca
+    const iceServers = await fetchTurnCredentials();
+
+    const options = {
+        debug: 3, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
+        config: { iceServers }
+    };
+
+    addDebugLog(`Creating peer with ${iceServers.length} ICE servers`);
+
+    return new Promise((resolve, reject) => {
         peer = customId ? new Peer(customId, options) : new Peer(options);
 
         peer.on('open', (id) => {
