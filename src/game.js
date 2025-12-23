@@ -8,7 +8,8 @@ import {
     onMessage,
     offMessage,
     sendMessage,
-    isConnected
+    isConnected,
+    getDebugLog
 } from './core/peer.js';
 import { GameRegistry } from './games/GameRegistry.js';
 import { ResponsiveCanvas } from './ui/responsive.js';
@@ -154,17 +155,38 @@ async function connectForGame(code, host) {
     await connectGuestToHost(code);
 }
 
+// Debug log element and update interval
+const debugLogEl = document.getElementById('debug-log');
+let debugLogInterval = null;
+
+function updateDebugLog() {
+    if (!debugLogEl) return;
+    const logs = getDebugLog();
+    debugLogEl.innerHTML = logs.map(log => `<div>${log}</div>`).join('');
+    debugLogEl.scrollTop = debugLogEl.scrollHeight;
+}
+
 // Show status
 function showStatus(message) {
     statusMessage.textContent = message;
     statusOverlay.classList.remove('hidden');
     errorOverlay.classList.add('hidden');
     gameoverOverlay.classList.add('hidden');
+
+    // Start updating debug log
+    if (!debugLogInterval) {
+        updateDebugLog();
+        debugLogInterval = setInterval(updateDebugLog, 500);
+    }
 }
 
 // Hide status
 function hideStatus() {
     statusOverlay.classList.add('hidden');
+    if (debugLogInterval) {
+        clearInterval(debugLogInterval);
+        debugLogInterval = null;
+    }
 }
 
 // Show error
