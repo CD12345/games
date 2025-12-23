@@ -31,9 +31,18 @@ export function initPeer(customId = null) {
             return;
         }
 
-        // Use free PeerJS cloud server
+        // Use free PeerJS cloud server with public STUN servers
         const options = {
-            debug: 1 // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
+            debug: 2, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' }
+                ]
+            }
         };
 
         peer = customId ? new Peer(customId, options) : new Peer(options);
