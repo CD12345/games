@@ -47,9 +47,11 @@ body {
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.game-bar-title {
+.game-bar-code {
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.4em;
+    color: var(--accent);
+    text-transform: uppercase;
 }
 
 #game-container {
