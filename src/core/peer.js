@@ -9,6 +9,28 @@ let isHost = false;
 let messageHandlers = new Map();
 let connectionHandler = null;
 
+// Debug log for connection troubleshooting
+const debugLog = [];
+const MAX_DEBUG_ENTRIES = 50;
+
+export function addDebugLog(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = `[${timestamp}] ${message}`;
+    debugLog.push(entry);
+    console.log('PEER:', message);
+    if (debugLog.length > MAX_DEBUG_ENTRIES) {
+        debugLog.shift();
+    }
+}
+
+export function getDebugLog() {
+    return [...debugLog];
+}
+
+export function clearDebugLog() {
+    debugLog.length = 0;
+}
+
 function clearConnectionHandler() {
     if (!peer || !connectionHandler) return;
     if (typeof peer.off === 'function') {
@@ -22,11 +44,15 @@ function clearConnectionHandler() {
 // Initialize PeerJS with a custom ID (for host) or random ID (for guest)
 export function initPeer(customId = null) {
     return new Promise((resolve, reject) => {
+        addDebugLog(`initPeer called, customId=${customId || 'none'}`);
+
         if (peer && !peer.destroyed) {
             if (customId && peer.id && peer.id !== customId) {
+                addDebugLog('ERROR: Peer already initialized with different ID');
                 reject(new Error('Peer already initialized with a different ID.'));
                 return;
             }
+            addDebugLog(`Reusing existing peer: ${peer.id}`);
             resolve(peer.id);
             return;
         }
@@ -70,17 +96,17 @@ export function initPeer(customId = null) {
             }
         };
 
-        console.log('Initializing peer with ICE servers:', options.config.iceServers);
+        addDebugLog(`Creating peer with ${options.config.iceServers.length} ICE servers`);
 
         peer = customId ? new Peer(customId, options) : new Peer(options);
 
         peer.on('open', (id) => {
-            console.log('Peer connected with ID:', id);
+            addDebugLog(`Peer OPEN with ID: ${id}`);
             resolve(id);
         });
 
         peer.on('error', (err) => {
-            console.error('Peer error:', err);
+            addDebugLog(`Peer ERROR: ${err.type} - ${err.message || err}`);
             if (err.type === 'unavailable-id') {
                 reject(new Error('Game code already in use. Try another.'));
             } else if (err.type === 'peer-unavailable') {
@@ -91,9 +117,10 @@ export function initPeer(customId = null) {
         });
 
         peer.on('disconnected', () => {
-            console.log('Peer disconnected from server');
+            addDebugLog('Peer DISCONNECTED from signaling server');
             // Try to reconnect
             if (peer && !peer.destroyed) {
+                addDebugLog('Attempting to reconnect...');
                 peer.reconnect();
             }
         });
@@ -104,18 +131,30 @@ export function initPeer(customId = null) {
 export function waitForConnection() {
     return new Promise((resolve) => {
         isHost = true;
+        addDebugLog('Host waiting for guest connection...');
 
         if (currentConnection && currentConnection.open) {
+            addDebugLog('Reusing existing open connection');
             resolve(currentConnection);
             return;
         }
 
         clearConnectionHandler();
         connectionHandler = (conn) => {
-            console.log('Guest connected:', conn.peer);
+            addDebugLog(`Guest connecting: ${conn.peer}`);
             currentConnection = conn;
             setupConnection(conn);
-            resolve(conn);
+
+            conn.on('open', () => {
+                addDebugLog('Guest connection OPEN');
+                resolve(conn);
+            });
+
+            // If already open, resolve immediately
+            if (conn.open) {
+                addDebugLog('Guest connection already open');
+                resolve(conn);
+            }
         };
         peer.on('connection', connectionHandler);
     });
@@ -126,32 +165,53 @@ export function connectToPeer(hostId) {
     return new Promise((resolve, reject) => {
         isHost = false;
 
-        console.log('Attempting to connect to host:', hostId);
+        addDebugLog(`Guest connecting to host: ${hostId}`);
         const conn = peer.connect(hostId, {
             reliable: true
         });
 
         // Log ICE connection state changes
         conn.on('iceStateChanged', (state) => {
-            console.log('ICE state changed:', state);
+            addDebugLog(`ICE state: ${state}`);
         });
 
+        // Monitor the underlying peer connection for more details
+        const checkIceState = setInterval(() => {
+            if (conn.peerConnection) {
+                const pc = conn.peerConnection;
+                addDebugLog(`ICE: ${pc.iceConnectionState}, Gather: ${pc.iceGatheringState}`);
+
+                // Log ICE candidates
+                if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                    addDebugLog('ICE FAILED - TURN servers may not be working');
+                    clearInterval(checkIceState);
+                }
+                if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                    addDebugLog('ICE connected successfully');
+                    clearInterval(checkIceState);
+                }
+            }
+        }, 1000);
+
         conn.on('open', () => {
-            console.log('Connected to host:', hostId);
+            addDebugLog('Connection OPEN to host');
+            clearInterval(checkIceState);
             currentConnection = conn;
             setupConnection(conn);
             resolve(conn);
         });
 
         conn.on('error', (err) => {
-            console.error('Connection error:', err);
+            addDebugLog(`Connection ERROR: ${err.message || err}`);
+            clearInterval(checkIceState);
             reject(new Error('Failed to connect to game.'));
         });
 
         // Timeout after 20 seconds (increased for slow TURN negotiation)
         setTimeout(() => {
             if (!currentConnection) {
-                console.error('Connection timeout - ICE negotiation may have failed');
+                addDebugLog('Connection TIMEOUT after 20s');
+                clearInterval(checkIceState);
                 reject(new Error('Connection timeout. Game may not exist.'));
             }
         }, 20000);
