@@ -55,8 +55,24 @@ const elements = {
     btnJoinOffer: document.getElementById('btn-join-offer'),
     namePanel: document.getElementById('name-panel'),
     playerName: document.getElementById('player-name'),
-    menuCodeDisplay: document.getElementById('menu-code-display')
+    menuCodeDisplay: document.getElementById('menu-code-display'),
+    lastModified: document.getElementById('last-modified')
 };
+
+// Show last modified timestamp
+if (elements.lastModified) {
+    const lastMod = new Date(document.lastModified);
+    if (!isNaN(lastMod.getTime())) {
+        elements.lastModified.textContent = lastMod.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } else {
+        elements.lastModified.textContent = 'v' + Date.now().toString(36).slice(-6);
+    }
+}
 
 // State
 let currentScreen = 'mainMenu';

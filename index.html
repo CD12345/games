@@ -5,14 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#1a1a2e">
     <title>Party Games</title>
+    <link rel="stylesheet" href="styles/status-bar.css">
     <link rel="stylesheet" href="styles/main.css">
     <!-- PeerJS for P2P connections -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
     <div id="app">
-        <div id="menu-bar">
-            <div class="menu-bar-code" id="menu-code-display"></div>
+        <div id="status-bar">
+            <div class="status-bar-left">
+                <span id="last-modified" class="last-modified"></span>
+            </div>
+            <div class="status-bar-code" id="menu-code-display"></div>
         </div>
         <!-- Main Menu Screen -->
         <div id="main-menu" class="screen active">

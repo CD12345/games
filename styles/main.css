@@ -41,41 +41,9 @@ body {
     flex-direction: column;
 }
 
-#menu-bar {
-    height: 52px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding: 0 1rem;
-    background: rgba(0, 0, 0, 0.35);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    flex-shrink: 0;
+/* Status bar extends full width in menu */
+#status-bar {
     margin: 0 -1.5rem 1rem;
-}
-
-.menu-bar-code {
-    font-weight: 700;
-    letter-spacing: 0.4em;
-    color: var(--accent);
-    text-transform: uppercase;
-    cursor: pointer;
-    padding: 0.5rem 0.75rem;
-    margin: -0.5rem -0.75rem;
-    border-radius: 6px;
-    transition: background 0.15s, color 0.15s;
-}
-
-.menu-bar-code:hover {
-    background: rgba(233, 69, 96, 0.15);
-}
-
-.menu-bar-code:active {
-    background: rgba(233, 69, 96, 0.25);
-}
-
-.menu-bar-code.copied {
-    color: #00ff88;
-    background: rgba(0, 255, 136, 0.15);
 }
 
 /* Screens */

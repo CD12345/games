@@ -38,12 +38,16 @@ const lastModifiedEl = document.getElementById('last-modified');
 // Show last modified timestamp
 if (lastModifiedEl) {
     const lastMod = new Date(document.lastModified);
-    lastModifiedEl.textContent = lastMod.toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
+    if (!isNaN(lastMod.getTime())) {
+        lastModifiedEl.textContent = lastMod.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } else {
+        lastModifiedEl.textContent = 'v' + Date.now().toString(36).slice(-6);
+    }
 }
 
 // State
