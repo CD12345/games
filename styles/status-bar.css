@@ -1,0 +1,52 @@
+/* Shared status bar styles for menu and game pages */
+
+#status-bar {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1rem;
+    background: rgba(0, 0, 0, 0.35);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
+}
+
+.status-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.last-modified {
+    font-size: 0.75rem;
+    color: var(--text-primary);
+}
+
+.status-bar-code {
+    font-weight: 700;
+    letter-spacing: 0.4em;
+    color: var(--accent);
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    margin: -0.5rem -0.75rem;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.status-bar-code:hover {
+    background: rgba(233, 69, 96, 0.15);
+}
+
+.status-bar-code:active {
+    background: rgba(233, 69, 96, 0.25);
+}
+
+.status-bar-code:empty {
+    display: none;
+}
+
+.status-bar-code.copied {
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.15);
+}
