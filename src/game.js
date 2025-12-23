@@ -7,7 +7,8 @@ import {
     connectToPeer,
     onMessage,
     offMessage,
-    sendMessage
+    sendMessage,
+    isConnected
 } from './core/peer.js';
 import { GameRegistry } from './games/GameRegistry.js';
 import { ResponsiveCanvas } from './ui/responsive.js';
@@ -36,6 +37,9 @@ let gameCode = null;
 let isHost = false;
 let gameInstance = null;
 let responsiveCanvas = null;
+let reconnectTimer = null;
+let reconnectInFlight = false;
+let reconnecting = false;
 
 // Get parameters from URL
 function getURLParams() {
@@ -157,6 +161,67 @@ function showError(message) {
     gameoverOverlay.classList.add('hidden');
 }
 
+function showConnectionLost() {
+    errorMessage.textContent = 'Connection lost. Retrying...';
+    btnBackHome.textContent = 'Back to Menu';
+    errorOverlay.classList.remove('hidden');
+    statusOverlay.classList.add('hidden');
+    gameoverOverlay.classList.add('hidden');
+}
+
+function hideConnectionLost() {
+    errorOverlay.classList.add('hidden');
+}
+
+function stopReconnectLoop() {
+    reconnecting = false;
+    reconnectInFlight = false;
+    if (reconnectTimer) {
+        clearInterval(reconnectTimer);
+        reconnectTimer = null;
+    }
+    hideConnectionLost();
+    if (gameInstance && !document.hidden) {
+        gameInstance.start();
+    }
+}
+
+async function attemptReconnect() {
+    if (!reconnecting || reconnectInFlight) {
+        return;
+    }
+    if (isConnected()) {
+        stopReconnectLoop();
+        return;
+    }
+    reconnectInFlight = true;
+    try {
+        if (isHost) {
+            await waitForConnection();
+        } else {
+            await connectToPeer(gameCode);
+        }
+        stopReconnectLoop();
+    } catch (error) {
+        reconnectInFlight = false;
+    }
+}
+
+function startReconnectLoop() {
+    if (reconnecting) {
+        return;
+    }
+    reconnecting = true;
+    showConnectionLost();
+    if (gameInstance) {
+        gameInstance.pause();
+    }
+    attemptReconnect();
+    reconnectTimer = setInterval(() => {
+        attemptReconnect();
+    }, 1000);
+}
+
 function showGameOver(result, playerNumber, playerNames) {
     const getName = (id) => playerNames?.[id] || (id === 'p1' ? 'Player 1' : 'Player 2');
     if (result?.forfeitedBy) {
@@ -261,6 +326,9 @@ async function init() {
         onMessage('return_to_menu', () => {
             returnToMenu(false);
         });
+        onMessage('_disconnect', () => {
+            startReconnectLoop();
+        });
 
     } catch (error) {
         console.error('Initialization error:', error);
@@ -279,6 +347,8 @@ function cleanup() {
         responsiveCanvas = null;
     }
     offMessage('return_to_menu');
+    offMessage('_disconnect');
+    stopReconnectLoop();
     leaveGame();
 }
 
