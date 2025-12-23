@@ -149,6 +149,30 @@ function setMenuCodeDisplay(code, options = {}) {
     }
 }
 
+function getKnownCode() {
+    const display = elements.menuCodeDisplay?.textContent?.trim();
+    if (display) {
+        return display.toUpperCase();
+    }
+    const params = new URLSearchParams(window.location.search);
+    const urlCode = params.get('code');
+    if (urlCode) {
+        return urlCode.toUpperCase();
+    }
+    return '';
+}
+
+function setJoinCodeValue(value) {
+    if (!elements.joinCode) return;
+    const cleaned = (value || '').toUpperCase().replace(/[^A-Z]/g, '');
+    elements.joinCode.value = cleaned;
+    elements.btnJoinSubmit.disabled = cleaned.length !== 4;
+    elements.joinError.textContent = '';
+    if (cleaned.length === 4) {
+        setMenuCodeDisplay(cleaned);
+    }
+}
+
 // Debug mode state
 let debugModeHoldTimer = null;
 let debugModeIndicator = null;
@@ -270,6 +294,9 @@ function showScreen(screenName) {
     screens[screenName].classList.add('active');
     currentScreen = screenName;
     updateNamePanelVisibility(screenName);
+    if (screenName === 'joinScreen') {
+        setJoinCodeValue(getKnownCode());
+    }
 }
 
 function showLoading(message = 'Loading...') {
@@ -401,9 +428,6 @@ function setupEventListeners() {
     });
 
     elements.btnJoin.addEventListener('click', () => {
-        elements.joinCode.value = '';
-        elements.joinError.textContent = '';
-        elements.btnJoinSubmit.disabled = true;
         showScreen('joinScreen');
     });
 
@@ -413,15 +437,15 @@ function setupEventListeners() {
     elements.btnBackLobby.addEventListener('click', () => handleLeaveLobby(true));
 
     // Join screen
-        elements.joinCode.addEventListener('input', (e) => {
-            const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
-            e.target.value = value;
-            elements.btnJoinSubmit.disabled = value.length !== 4;
-            elements.joinError.textContent = '';
-            if (value.length === 4) {
-                setMenuCodeDisplay(value);
-            }
-        });
+    elements.joinCode.addEventListener('input', (e) => {
+        const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+        e.target.value = value;
+        elements.btnJoinSubmit.disabled = value.length !== 4;
+        elements.joinError.textContent = '';
+        if (value.length === 4) {
+            setMenuCodeDisplay(value);
+        }
+    });
 
     elements.btnJoinSubmit.addEventListener('click', handleJoinGame);
 
@@ -683,12 +707,15 @@ function handleLeaveLobby(notifyPeer = true) {
         sendMessage('return_to_menu', {});
     }
 
-    leaveGame();
+    const keepPeer = isHost && !!currentGameCode;
+    leaveGame({ keepPeer });
     clearStoredSession();
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
-    setMenuCodeDisplay('');
+    if (!keepPeer) {
+        setMenuCodeDisplay('');
+    }
     showScreen('mainMenu');
 }
 
