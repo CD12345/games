@@ -33,35 +33,44 @@ export function initPeer(customId = null) {
 
         // Use free PeerJS cloud server with STUN/TURN servers
         const options = {
-            debug: 2, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
+            debug: 3, // 0 = no logs, 1 = errors, 2 = warnings, 3 = all
             config: {
                 iceServers: [
+                    // Google STUN servers
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
-                    // Free TURN servers from Metered.ca OpenRelay
+                    // Free TURN server from freestun.net
                     {
-                        urls: 'turn:a.relay.metered.ca:80',
-                        username: 'e8dd65b92f0a135494406347',
-                        credential: 'xJONPdSvyLYwvT/M'
+                        urls: 'turn:freestun.net:3478',
+                        username: 'free',
+                        credential: 'free'
                     },
                     {
-                        urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-                        username: 'e8dd65b92f0a135494406347',
-                        credential: 'xJONPdSvyLYwvT/M'
+                        urls: 'turns:freestun.net:5350',
+                        username: 'free',
+                        credential: 'free'
+                    },
+                    // Open Relay TURN servers (backup)
+                    {
+                        urls: 'turn:openrelay.metered.ca:80',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
                     },
                     {
-                        urls: 'turn:a.relay.metered.ca:443',
-                        username: 'e8dd65b92f0a135494406347',
-                        credential: 'xJONPdSvyLYwvT/M'
+                        urls: 'turn:openrelay.metered.ca:443',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
                     },
                     {
-                        urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-                        username: 'e8dd65b92f0a135494406347',
-                        credential: 'xJONPdSvyLYwvT/M'
+                        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
                     }
                 ]
             }
         };
+
+        console.log('Initializing peer with ICE servers:', options.config.iceServers);
 
         peer = customId ? new Peer(customId, options) : new Peer(options);
 
@@ -117,8 +126,14 @@ export function connectToPeer(hostId) {
     return new Promise((resolve, reject) => {
         isHost = false;
 
+        console.log('Attempting to connect to host:', hostId);
         const conn = peer.connect(hostId, {
             reliable: true
+        });
+
+        // Log ICE connection state changes
+        conn.on('iceStateChanged', (state) => {
+            console.log('ICE state changed:', state);
         });
 
         conn.on('open', () => {
@@ -133,12 +148,13 @@ export function connectToPeer(hostId) {
             reject(new Error('Failed to connect to game.'));
         });
 
-        // Timeout after 10 seconds
+        // Timeout after 20 seconds (increased for slow TURN negotiation)
         setTimeout(() => {
             if (!currentConnection) {
+                console.error('Connection timeout - ICE negotiation may have failed');
                 reject(new Error('Connection timeout. Game may not exist.'));
             }
-        }, 10000);
+        }, 20000);
     });
 }
 
