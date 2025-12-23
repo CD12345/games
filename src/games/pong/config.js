@@ -50,7 +50,8 @@ export function getInitialState() {
             phase: 'countdown', // 'countdown', 'playing', 'scored', 'gameover'
             startTime: Date.now(),
             lastScorer: null,
-            winner: null
+            winner: null,
+            forfeitBy: null
         }
     };
 }
