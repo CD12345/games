@@ -7,6 +7,17 @@ let peer = null;
 let currentConnection = null;
 let isHost = false;
 let messageHandlers = new Map();
+let connectionHandler = null;
+
+function clearConnectionHandler() {
+    if (!peer || !connectionHandler) return;
+    if (typeof peer.off === 'function') {
+        peer.off('connection', connectionHandler);
+    } else if (typeof peer.removeListener === 'function') {
+        peer.removeListener('connection', connectionHandler);
+    }
+    connectionHandler = null;
+}
 
 // Initialize PeerJS with a custom ID (for host) or random ID (for guest)
 export function initPeer(customId = null) {
@@ -63,12 +74,14 @@ export function waitForConnection() {
             return;
         }
 
-        peer.on('connection', (conn) => {
+        clearConnectionHandler();
+        connectionHandler = (conn) => {
             console.log('Guest connected:', conn.peer);
             currentConnection = conn;
             setupConnection(conn);
             resolve(conn);
-        });
+        };
+        peer.on('connection', connectionHandler);
     });
 }
 
@@ -189,12 +202,14 @@ export function getLatency() {
 }
 
 // Disconnect and cleanup
-export function disconnect() {
+export function disconnect(options = {}) {
+    const keepPeer = options.keepPeer === true;
     if (currentConnection) {
         currentConnection.close();
         currentConnection = null;
     }
-    if (peer) {
+    clearConnectionHandler();
+    if (peer && !keepPeer) {
         peer.destroy();
         peer = null;
     }

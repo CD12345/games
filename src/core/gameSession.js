@@ -29,17 +29,26 @@ export async function createGame(gameType, playerName) {
 
     const existingCode = sessionStorage.getItem('pairCode');
     const existingHost = sessionStorage.getItem('pairIsHost') === 'true';
-    const sessionLinked = sessionStorage.getItem('sessionLinked') === 'true';
 
     // Generate a unique code and use it as the peer ID (reuse session code when linked)
     let code = null;
     let attempts = 0;
 
-    if (sessionLinked && existingHost && existingCode) {
+    if (existingHost && existingCode) {
         code = existingCode;
-        await initPeer(code);
-        waitForConnection();
-    } else {
+        try {
+            await initPeer(code);
+            waitForConnection();
+        } catch (error) {
+            if (error?.message?.includes('already in use')) {
+                throw new Error('Game code already in use. Please wait a moment and try again.');
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    if (!code) {
         while (attempts < 5) {
             code = generateCode();
             try {
@@ -211,8 +220,8 @@ function setupGuestListeners() {
 }
 
 // Leave the current game
-export function leaveGame() {
-    disconnect();
+export function leaveGame(options = {}) {
+    disconnect({ keepPeer: options.keepPeer === true });
     currentSession = null;
     playerUpdateCallback = null;
     gameStatusCallback = null;
