@@ -13,6 +13,7 @@ import {
 import { GameRegistry } from './games/GameRegistry.js';
 import { ResponsiveCanvas } from './ui/responsive.js';
 import { PONG_CONFIG } from './games/pong/config.js';
+import { getBasePath, getEntryPath } from './ui/url.js';
 
 // Import games
 import './games/pong/index.js';
@@ -242,9 +243,15 @@ function returnToMenu(notifyPeer = true) {
     if (notifyPeer) {
         sendMessage('return_to_menu', {});
     }
+    const returnCode = gameCode || '';
+    const targetUrl = new URL(window.location.href);
+    targetUrl.pathname = getEntryPath();
+    targetUrl.searchParams.set('code', returnCode.toUpperCase());
+    targetUrl.searchParams.delete('host');
+    targetUrl.searchParams.delete('game');
     cleanup();
     clearStoredSession();
-    window.location.href = 'index.html';
+    window.location.href = targetUrl.toString();
 }
 
 // Initialize
