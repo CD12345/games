@@ -65,18 +65,19 @@ export function initPeer(customId = null) {
                     // Google STUN servers
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
-                    // Free TURN server from freestun.net
+                    // Cloudflare TURN (free, no auth needed for basic use)
+                    { urls: 'stun:stun.cloudflare.com:3478' },
                     {
-                        urls: 'turn:freestun.net:3478',
-                        username: 'free',
-                        credential: 'free'
+                        urls: 'turn:turn.cloudflare.com:3478?transport=udp',
+                        username: '',
+                        credential: ''
                     },
                     {
-                        urls: 'turns:freestun.net:5350',
-                        username: 'free',
-                        credential: 'free'
+                        urls: 'turn:turn.cloudflare.com:3478?transport=tcp',
+                        username: '',
+                        credential: ''
                     },
-                    // Open Relay TURN servers (backup)
+                    // Open Relay TURN servers (may require signup now)
                     {
                         urls: 'turn:openrelay.metered.ca:80',
                         username: 'openrelayproject',
