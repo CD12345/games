@@ -33,6 +33,18 @@ const gameoverMessage = document.getElementById('gameover-message');
 const btnPlayAgain = document.getElementById('btn-play-again');
 const btnBackMenu = document.getElementById('btn-back-menu');
 const gameCodeDisplay = document.getElementById('game-code-display');
+const lastModifiedEl = document.getElementById('last-modified');
+
+// Show last modified timestamp
+if (lastModifiedEl) {
+    const lastMod = new Date(document.lastModified);
+    lastModifiedEl.textContent = lastMod.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
 
 // State
 let gameCode = null;
