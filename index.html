@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Party Games</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <!-- PeerJS for P2P connections -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Main Menu Screen -->
+        <div id="main-menu" class="screen active">
+            <h1>Party Games</h1>
+            <p class="subtitle">Play with friends</p>
+
+            <div class="menu-buttons">
+                <button id="btn-create" class="btn btn-primary">Create Game</button>
+                <button id="btn-join" class="btn btn-secondary">Join Game</button>
+            </div>
+        </div>
+
+        <!-- Join Game Screen -->
+        <div id="join-screen" class="screen">
+            <button class="btn-back" id="btn-back-join">&larr; Back</button>
+            <h2>Join Game</h2>
+            <p>Enter the 4-letter code</p>
+
+            <div class="code-input-container">
+                <input type="text" id="join-code" maxlength="4" placeholder="XXXX" autocomplete="off" autocapitalize="characters">
+            </div>
+
+            <button id="btn-join-submit" class="btn btn-primary" disabled>Join</button>
+            <p id="join-error" class="error-message"></p>
+        </div>
+
+        <!-- Select Game Screen -->
+        <div id="select-game-screen" class="screen">
+            <button class="btn-back" id="btn-back-select">&larr; Back</button>
+            <h2>Select Game</h2>
+            <p>Choose a game to play</p>
+
+            <div id="game-list" class="game-list">
+                <!-- Games populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Lobby Screen (waiting room) -->
+        <div id="lobby-screen" class="screen">
+            <button class="btn-back" id="btn-back-lobby">&larr; Back</button>
+            <h2 id="lobby-game-name">Game Name</h2>
+
+            <div class="code-display">
+                <span id="lobby-code">XXXX</span>
+                <button id="btn-copy-code" class="btn-icon" title="Copy code">📋</button>
+            </div>
+            <p class="code-hint">Share this code with your friend</p>
+
+            <div id="player-list" class="player-list">
+                <!-- Players populated by JavaScript -->
+            </div>
+
+            <button id="btn-start-game" class="btn btn-primary" disabled>Waiting for players...</button>
+        </div>
+
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="screen">
+            <div class="loader"></div>
+            <p id="loading-message">Connecting...</p>
+        </div>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>

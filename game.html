@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Party Games - Playing</title>
+    <link rel="stylesheet" href="styles/game.css">
+    <!-- PeerJS for P2P connections -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Connection status overlay -->
+        <div id="status-overlay" class="overlay hidden">
+            <div class="status-content">
+                <div class="loader"></div>
+                <p id="status-message">Connecting...</p>
+            </div>
+        </div>
+
+        <!-- Error overlay -->
+        <div id="error-overlay" class="overlay hidden">
+            <div class="error-content">
+                <h2>Connection Lost</h2>
+                <p id="error-message">Unable to connect to game.</p>
+                <button id="btn-back-home" class="btn">Back to Home</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="src/game.js"></script>
+</body>
+</html>
