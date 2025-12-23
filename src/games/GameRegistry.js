@@ -16,7 +16,8 @@ export const GameRegistry = {
             maxPlayers: config.maxPlayers || 2,
             icon: config.icon || '🎮',
             gameClass: config.gameClass,
-            getInitialState: config.getInitialState
+            getInitialState: config.getInitialState,
+            debugOnly: config.debugOnly || false
         });
     },
 
@@ -26,15 +27,18 @@ export const GameRegistry = {
     },
 
     // Get list of all games for selection UI
-    getGameList() {
-        return Array.from(games.values()).map(game => ({
-            id: game.id,
-            name: game.name,
-            description: game.description,
-            minPlayers: game.minPlayers,
-            maxPlayers: game.maxPlayers,
-            icon: game.icon
-        }));
+    // Pass includeDebug=true to include debug-only games
+    getGameList(includeDebug = false) {
+        return Array.from(games.values())
+            .filter(game => includeDebug || !game.debugOnly)
+            .map(game => ({
+                id: game.id,
+                name: game.name,
+                description: game.description,
+                minPlayers: game.minPlayers,
+                maxPlayers: game.maxPlayers,
+                icon: game.icon
+            }));
     },
 
     // Get game class for instantiation

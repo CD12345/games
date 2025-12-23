@@ -22,6 +22,7 @@ import { getBasePath, storeEntryPath } from './ui/url.js';
 
 // Import and register games
 import './games/pong/index.js';
+import './games/debug/index.js';
 
 // DOM Elements
 const screens = {
@@ -562,11 +563,49 @@ function setupEventListeners() {
 
     // Join offer
     elements.btnJoinOffer.addEventListener('click', handleJoinOffer);
+
+    // Copy join URL when tapping the menu code display
+    elements.menuCodeDisplay.addEventListener('click', handleCopyMenuCode);
+}
+
+async function handleCopyMenuCode() {
+    const code = elements.menuCodeDisplay?.textContent?.trim();
+    if (!code) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('code', code.toUpperCase());
+    const joinUrl = url.toString();
+
+    try {
+        await navigator.clipboard.writeText(joinUrl);
+        const original = elements.menuCodeDisplay.textContent;
+        elements.menuCodeDisplay.textContent = 'Copied!';
+        elements.menuCodeDisplay.classList.add('copied');
+        setTimeout(() => {
+            elements.menuCodeDisplay.textContent = original;
+            elements.menuCodeDisplay.classList.remove('copied');
+        }, 1500);
+    } catch (err) {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = joinUrl;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        const original = elements.menuCodeDisplay.textContent;
+        elements.menuCodeDisplay.textContent = 'Copied!';
+        elements.menuCodeDisplay.classList.add('copied');
+        setTimeout(() => {
+            elements.menuCodeDisplay.textContent = original;
+            elements.menuCodeDisplay.classList.remove('copied');
+        }, 1500);
+    }
 }
 
 // Populate game list for selection
 function populateGameList() {
-    const games = GameRegistry.getGameList();
+    const games = GameRegistry.getGameList(isDebugMode());
     elements.gameList.innerHTML = '';
 
     games.forEach(game => {

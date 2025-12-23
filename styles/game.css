@@ -52,6 +52,24 @@ body {
     letter-spacing: 0.4em;
     color: var(--accent);
     text-transform: uppercase;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    margin: -0.5rem -0.75rem;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.game-bar-code:hover {
+    background: rgba(233, 69, 96, 0.15);
+}
+
+.game-bar-code:active {
+    background: rgba(233, 69, 96, 0.25);
+}
+
+.game-bar-code.copied {
+    color: #00ff88;
+    background: rgba(0, 255, 136, 0.15);
 }
 
 #game-container {

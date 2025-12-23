@@ -17,6 +17,7 @@ import { getBasePath, getEntryPath } from './ui/url.js';
 
 // Import games
 import './games/pong/index.js';
+import './games/debug/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -355,6 +356,44 @@ function cleanup() {
     stopReconnectLoop();
     leaveGame();
 }
+
+// Copy join URL when tapping the code display
+gameCodeDisplay.addEventListener('click', async () => {
+    if (!gameCode) return;
+
+    const url = new URL(window.location.href);
+    url.pathname = getEntryPath();
+    url.searchParams.set('code', gameCode.toUpperCase());
+    url.searchParams.delete('host');
+    url.searchParams.delete('game');
+    const joinUrl = url.toString();
+
+    try {
+        await navigator.clipboard.writeText(joinUrl);
+        const original = gameCodeDisplay.textContent;
+        gameCodeDisplay.textContent = 'Copied!';
+        gameCodeDisplay.classList.add('copied');
+        setTimeout(() => {
+            gameCodeDisplay.textContent = original;
+            gameCodeDisplay.classList.remove('copied');
+        }, 1500);
+    } catch (err) {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = joinUrl;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        const original = gameCodeDisplay.textContent;
+        gameCodeDisplay.textContent = 'Copied!';
+        gameCodeDisplay.classList.add('copied');
+        setTimeout(() => {
+            gameCodeDisplay.textContent = original;
+            gameCodeDisplay.classList.remove('copied');
+        }, 1500);
+    }
+});
 
 // Event listeners
 btnBackHome.addEventListener('click', () => {
