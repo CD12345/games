@@ -166,7 +166,7 @@ export class PongGame extends GameEngine {
 
         const phaseScore = `${this.state.round.phase} ${this.state.scores.p1}-${this.state.scores.p2}`;
         let debugValue = phaseScore;
-        if (this.debugDistanceFeet !== null) {
+        if (this.proximityAvailable === true && this.debugDistanceFeet !== null) {
             debugValue = `${this.debugDistanceFeet.toFixed(1)} ft | ${phaseScore}`;
         } else if (this.proximityAvailable === false) {
             debugValue = `no prox | ${phaseScore}`;
