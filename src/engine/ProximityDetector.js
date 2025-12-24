@@ -138,9 +138,10 @@ export class ProximityDetector {
 
         this.chirpSentTime = performance.now();
         this.pendingChirp = true;
-        // Ignore our own echo for 150ms after emitting
-        this.deafUntil = this.chirpSentTime + 150;
-        debugLog(`Chirp emitted, deaf until ${this.deafUntil.toFixed(0)}ms`);
+        // Ignore our own echo for just 30ms (chirp duration + buffer)
+        // Response from other device arrives after ~50-100ms (network + sound)
+        this.deafUntil = this.chirpSentTime + 30;
+        debugLog(`Chirp emitted at ${this.chirpSentTime.toFixed(0)}ms`);
 
         // Clear pending after timeout (max reasonable distance)
         setTimeout(() => {
