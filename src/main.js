@@ -44,6 +44,12 @@ const elements = {
     btnJoinSubmit: document.getElementById('btn-join-submit'),
     joinError: document.getElementById('join-error'),
     gameList: document.getElementById('game-list'),
+    gameOptionsPanel: document.getElementById('game-options-panel'),
+    gameOptionsTitle: document.getElementById('game-options-title'),
+    gameOptionsMeta: document.getElementById('game-options-meta'),
+    gameOptionsList: document.getElementById('game-options-list'),
+    gameOptionsEmpty: document.getElementById('game-options-empty'),
+    btnCreateSelected: document.getElementById('btn-create-selected'),
     lobbyGameName: document.getElementById('lobby-game-name'),
     lobbyCode: document.getElementById('lobby-code'),
     btnCopyCode: document.getElementById('btn-copy-code'),
@@ -87,6 +93,9 @@ let pendingOffer = null;
 let sessionLinkReady = false;
 let playerName = '';
 let currentSettings = {}; // Current game settings values
+let currentSettingsGameId = null;
+let selectedGameType = null;
+let selectedGameCard = null;
 
 const NAME_SCREENS = new Set(['mainMenu', 'joinScreen']);
 const ADJECTIVES = [
@@ -115,6 +124,81 @@ function getCookie(name) {
 function setCookie(name, value, days = 365) {
     const maxAge = days * 24 * 60 * 60;
     document.cookie = `${name}=${encodeURIComponent(value)}; max-age=${maxAge}; path=/`;
+}
+
+function getSettingsCookieKey(gameType) {
+    return `gameSettings_${gameType}`;
+}
+
+function normalizeSettings(gameType, settings) {
+    const game = GameRegistry.getGame(gameType);
+    const defaults = GameRegistry.getDefaultSettings(gameType);
+    const normalized = { ...defaults };
+    const values = settings && typeof settings === 'object' ? settings : {};
+
+    (game?.settings || []).forEach(setting => {
+        if (!(setting.id in values)) {
+            return;
+        }
+        const value = values[setting.id];
+        switch (setting.type) {
+            case 'checkbox':
+                if (typeof value === 'boolean') {
+                    normalized[setting.id] = value;
+                } else if (typeof value === 'string') {
+                    normalized[setting.id] = value === 'true';
+                } else {
+                    normalized[setting.id] = Boolean(value);
+                }
+                break;
+            case 'string':
+                if (value === null || value === undefined) {
+                    normalized[setting.id] = '';
+                } else {
+                    normalized[setting.id] = String(value);
+                }
+                break;
+            case 'enum':
+                if ((setting.options || []).includes(value)) {
+                    normalized[setting.id] = value;
+                }
+                break;
+        }
+    });
+
+    return normalized;
+}
+
+function loadSettingsFromCookie(gameType) {
+    if (!gameType) return {};
+    const raw = getCookie(getSettingsCookieKey(gameType));
+    if (!raw) {
+        return normalizeSettings(gameType, {});
+    }
+    try {
+        return normalizeSettings(gameType, JSON.parse(raw));
+    } catch (error) {
+        return normalizeSettings(gameType, {});
+    }
+}
+
+function storeSettingsToCookie(gameType, settings) {
+    if (!gameType) return;
+    const normalized = normalizeSettings(gameType, settings);
+    setCookie(getSettingsCookieKey(gameType), JSON.stringify(normalized));
+}
+
+function setCurrentSettingsForGame(gameType, settings) {
+    if (!gameType) return;
+    currentSettings = normalizeSettings(gameType, settings);
+    currentSettingsGameId = gameType;
+}
+
+function ensureCurrentSettings(gameType) {
+    if (!gameType) return;
+    if (currentSettingsGameId !== gameType) {
+        setCurrentSettingsForGame(gameType, loadSettingsFromCookie(gameType));
+    }
 }
 
 function delay(ms) {
@@ -260,6 +344,7 @@ function storeSession() {
         return;
     }
 
+    ensureCurrentSettings(currentGameType);
     const payload = {
         code: currentGameCode,
         gameType: currentGameType,
@@ -404,6 +489,7 @@ function handleNewSession() {
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
+    resetGameSelection();
     setMenuCodeDisplay('');
     if (elements.joinCode) {
         elements.joinCode.value = '';
@@ -555,6 +641,13 @@ function setupEventListeners() {
     elements.btnBackSelect.addEventListener('click', () => showScreen('mainMenu'));
     elements.btnBackLobby.addEventListener('click', () => handleLeaveLobby(true));
 
+    if (elements.btnCreateSelected) {
+        elements.btnCreateSelected.addEventListener('click', () => {
+            if (!selectedGameType) return;
+            handleCreateGame(selectedGameType);
+        });
+    }
+
     // Join screen
     elements.joinCode.addEventListener('input', (e) => {
         const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
@@ -623,10 +716,169 @@ async function handleCopyMenuCode() {
     }
 }
 
+function resetGameSelection() {
+    if (selectedGameCard) {
+        selectedGameCard.classList.remove('selected');
+    }
+    selectedGameType = null;
+    selectedGameCard = null;
+    currentSettings = {};
+    currentSettingsGameId = null;
+    if (elements.gameOptionsPanel) {
+        elements.gameOptionsPanel.classList.add('hidden');
+    }
+    if (elements.btnCreateSelected) {
+        elements.btnCreateSelected.disabled = true;
+    }
+}
+
+function updateSettingValue(gameType, settingId, value) {
+    ensureCurrentSettings(gameType);
+    currentSettings[settingId] = value;
+    storeSettingsToCookie(gameType, currentSettings);
+}
+
+function renderSettingsPanel(gameType, options = {}) {
+    const game = GameRegistry.getGame(gameType);
+    const settings = game?.settings || [];
+    const container = options.container || elements.gameSettings;
+    const list = options.list || elements.settingsList;
+    const editable = options.editable ?? isHost;
+    const emptyMessage = options.emptyMessage || null;
+    const showWhenEmpty = options.showWhenEmpty === true;
+
+    if (!container || !list) {
+        return;
+    }
+
+    if (settings.length === 0 && !showWhenEmpty) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+    if (emptyMessage) {
+        emptyMessage.classList.toggle('hidden', settings.length !== 0);
+    }
+
+    list.innerHTML = '';
+    if (settings.length === 0) {
+        return;
+    }
+
+    ensureCurrentSettings(gameType);
+
+    settings.forEach(setting => {
+        const div = document.createElement('div');
+        div.className = 'setting-item';
+
+        const label = document.createElement('label');
+        label.className = 'setting-label';
+        label.textContent = setting.label;
+        label.setAttribute('for', `setting-${options.prefix || 'lobby'}-${setting.id}`);
+
+        const control = document.createElement('div');
+        control.className = 'setting-control';
+
+        let input;
+        switch (setting.type) {
+            case 'checkbox': {
+                const checkboxWrapper = document.createElement('label');
+                checkboxWrapper.className = 'setting-checkbox';
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.id = `setting-${options.prefix || 'lobby'}-${setting.id}`;
+                input.checked = !!currentSettings[setting.id];
+                input.disabled = !editable;
+                input.addEventListener('change', () => {
+                    updateSettingValue(gameType, setting.id, input.checked);
+                });
+                const toggle = document.createElement('span');
+                toggle.className = 'toggle';
+                checkboxWrapper.appendChild(input);
+                checkboxWrapper.appendChild(toggle);
+                control.appendChild(checkboxWrapper);
+                break;
+            }
+
+            case 'string':
+                input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'setting-string';
+                input.id = `setting-${options.prefix || 'lobby'}-${setting.id}`;
+                input.value = currentSettings[setting.id] || '';
+                input.disabled = !editable;
+                input.addEventListener('input', () => {
+                    updateSettingValue(gameType, setting.id, input.value);
+                });
+                control.appendChild(input);
+                break;
+
+            case 'enum':
+                input = document.createElement('select');
+                input.className = 'setting-enum';
+                input.id = `setting-${options.prefix || 'lobby'}-${setting.id}`;
+                input.disabled = !editable;
+                (setting.options || []).forEach(option => {
+                    const opt = document.createElement('option');
+                    opt.value = option;
+                    opt.textContent = option;
+                    if (option === currentSettings[setting.id]) {
+                        opt.selected = true;
+                    }
+                    input.appendChild(opt);
+                });
+                input.addEventListener('change', () => {
+                    updateSettingValue(gameType, setting.id, input.value);
+                });
+                control.appendChild(input);
+                break;
+        }
+
+        div.appendChild(label);
+        div.appendChild(control);
+        list.appendChild(div);
+    });
+}
+
+function selectGame(game, card) {
+    if (!game) return;
+    selectedGameType = game.id;
+    if (selectedGameCard && selectedGameCard !== card) {
+        selectedGameCard.classList.remove('selected');
+    }
+    selectedGameCard = card;
+    if (selectedGameCard) {
+        selectedGameCard.classList.add('selected');
+    }
+
+    setCurrentSettingsForGame(game.id, loadSettingsFromCookie(game.id));
+
+    if (elements.gameOptionsTitle) {
+        elements.gameOptionsTitle.textContent = `${game.icon} ${game.name}`;
+    }
+    if (elements.gameOptionsMeta) {
+        elements.gameOptionsMeta.textContent = `${game.minPlayers}-${game.maxPlayers} players`;
+    }
+    if (elements.btnCreateSelected) {
+        elements.btnCreateSelected.disabled = false;
+    }
+
+    renderSettingsPanel(game.id, {
+        container: elements.gameOptionsPanel,
+        list: elements.gameOptionsList,
+        emptyMessage: elements.gameOptionsEmpty,
+        showWhenEmpty: true,
+        editable: true,
+        prefix: 'select'
+    });
+}
+
 // Populate game list for selection
 function populateGameList() {
     const games = GameRegistry.getGameList(isDebugMode());
     elements.gameList.innerHTML = '';
+    resetGameSelection();
 
     games.forEach(game => {
         const card = document.createElement('div');
@@ -636,13 +888,15 @@ function populateGameList() {
             <p>${game.description}</p>
             <div class="player-count">${game.minPlayers}-${game.maxPlayers} players</div>
         `;
-        card.addEventListener('click', () => handleCreateGame(game.id));
+        card.addEventListener('click', () => selectGame(game, card));
         elements.gameList.appendChild(card);
     });
 }
 
 // Handle game creation
 async function handleCreateGame(gameType, options = {}) {
+    ensureCurrentSettings(gameType);
+    storeSettingsToCookie(gameType, currentSettings);
     const pairInfo = getPairInfo();
     let preferredCode = null;
     if (!options.fromRequest && pairInfo && !pairInfo.isHost) {
@@ -733,6 +987,7 @@ function enterLobby(gameType) {
     elements.lobbyGameName.textContent = `${game.icon} ${game.name}`;
     elements.lobbyCode.textContent = currentGameCode;
     setMenuCodeDisplay(currentGameCode);
+    ensureCurrentSettings(gameType);
     storeSession();
 
     const isLinked = sessionStorage.getItem('sessionLinked') === 'true';
@@ -756,7 +1011,7 @@ function enterLobby(gameType) {
         if (gameData && gameData.status === 'playing') {
             // Guest receives settings from host via game_start message
             if (gameData.settings) {
-                currentSettings = gameData.settings;
+                setCurrentSettingsForGame(gameType, gameData.settings);
             }
             // Game has started - redirect to game page
             storeSession();
@@ -823,89 +1078,11 @@ function updatePlayerList(players) {
 
 // Render game settings in lobby
 function renderSettings(gameType) {
-    const game = GameRegistry.getGame(gameType);
-    const settings = game?.settings || [];
-
-    // Initialize current settings with defaults
-    currentSettings = GameRegistry.getDefaultSettings(gameType);
-
-    if (settings.length === 0) {
-        elements.gameSettings.classList.add('hidden');
-        return;
-    }
-
-    elements.gameSettings.classList.remove('hidden');
-    elements.settingsList.innerHTML = '';
-
-    settings.forEach(setting => {
-        const div = document.createElement('div');
-        div.className = 'setting-item';
-
-        const label = document.createElement('label');
-        label.className = 'setting-label';
-        label.textContent = setting.label;
-        label.setAttribute('for', `setting-${setting.id}`);
-
-        const control = document.createElement('div');
-        control.className = 'setting-control';
-
-        let input;
-        switch (setting.type) {
-            case 'checkbox':
-                const checkboxWrapper = document.createElement('label');
-                checkboxWrapper.className = 'setting-checkbox';
-                input = document.createElement('input');
-                input.type = 'checkbox';
-                input.id = `setting-${setting.id}`;
-                input.checked = currentSettings[setting.id];
-                input.disabled = !isHost;
-                input.addEventListener('change', () => {
-                    currentSettings[setting.id] = input.checked;
-                });
-                const toggle = document.createElement('span');
-                toggle.className = 'toggle';
-                checkboxWrapper.appendChild(input);
-                checkboxWrapper.appendChild(toggle);
-                control.appendChild(checkboxWrapper);
-                break;
-
-            case 'string':
-                input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'setting-string';
-                input.id = `setting-${setting.id}`;
-                input.value = currentSettings[setting.id] || '';
-                input.disabled = !isHost;
-                input.addEventListener('input', () => {
-                    currentSettings[setting.id] = input.value;
-                });
-                control.appendChild(input);
-                break;
-
-            case 'enum':
-                input = document.createElement('select');
-                input.className = 'setting-enum';
-                input.id = `setting-${setting.id}`;
-                input.disabled = !isHost;
-                (setting.options || []).forEach(option => {
-                    const opt = document.createElement('option');
-                    opt.value = option;
-                    opt.textContent = option;
-                    if (option === currentSettings[setting.id]) {
-                        opt.selected = true;
-                    }
-                    input.appendChild(opt);
-                });
-                input.addEventListener('change', () => {
-                    currentSettings[setting.id] = input.value;
-                });
-                control.appendChild(input);
-                break;
-        }
-
-        div.appendChild(label);
-        div.appendChild(control);
-        elements.settingsList.appendChild(div);
+    renderSettingsPanel(gameType, {
+        container: elements.gameSettings,
+        list: elements.settingsList,
+        editable: isHost,
+        prefix: 'lobby'
     });
 }
 
@@ -935,6 +1112,7 @@ async function handleCopyCode() {
 // Start the game
 async function handleStartGame() {
     try {
+        ensureCurrentSettings(currentGameType);
         elements.btnStartGame.disabled = true;
         elements.btnStartGame.textContent = 'Starting...';
         storeSession();
@@ -972,6 +1150,7 @@ function handleLeaveLobby(notifyPeer = true) {
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
+    resetGameSelection();
     if (!keepPeer) {
         setMenuCodeDisplay('');
     }
