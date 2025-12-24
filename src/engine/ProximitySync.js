@@ -33,23 +33,17 @@ export class ProximitySync {
         // Start the detector
         const available = await this.detector.start();
 
-        // Set up detector callbacks
-        this.detector.onDistanceUpdate = (distance) => {
-            this.localDistance = distance;
-            this.updateConsensus();
-            // Share our measurement with peer
-            sendMessage('proximity_update', { distance });
-        };
+        // Set up detector callbacks (only host measures distance)
+        if (this.isHost) {
+            this.detector.onDistanceUpdate = (distance) => {
+                this.localDistance = distance;
+                this.updateConsensus();
+                // Share our measurement with peer
+                sendMessage('proximity_update', { distance });
+            };
+        }
 
-        this.detector.onChirpDetected = () => {
-            // When we detect a chirp, emit our own response chirp
-            // Small delay to avoid collision
-            setTimeout(() => {
-                if (this.isRunning) {
-                    this.detector.emitChirp();
-                }
-            }, 50);
-        };
+        // Guest doesn't need onChirpDetected - it just emits when pinged
 
         // Listen for peer's proximity updates
         onMessage('proximity_update', (data) => {
@@ -106,23 +100,19 @@ export class ProximitySync {
         console.log('ProximitySync stopped');
     }
 
-    // Host periodically initiates ping-pong chirp sequence
+    // Host periodically initiates distance measurement
+    // Flow: Host sends message -> Guest chirps -> Host detects chirp
+    // Distance = (detection_time - send_time - network_latency) * speed_of_sound
     startPinging() {
         this.pingInterval = setInterval(() => {
             if (!this.isRunning) return;
 
-            // Record time for latency measurement
+            // Record send time and set pending BEFORE sending
             this.latencyPingTime = performance.now();
+            this.detector.startMeasurement(this.latencyPingTime);
 
-            // Tell guest we're about to chirp (include timestamp for latency calc)
+            // Tell guest to chirp NOW
             sendMessage('proximity_ping', { timestamp: this.latencyPingTime });
-
-            // Emit our chirp after short delay
-            setTimeout(() => {
-                if (this.isRunning && this.detector.getIsAvailable()) {
-                    this.detector.emitChirp();
-                }
-            }, 10);
 
         }, PING_INTERVAL);
     }
