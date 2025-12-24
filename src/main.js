@@ -15,8 +15,7 @@ import {
     onMessage,
     offMessage,
     sendMessage,
-    isConnected,
-    getDebugLog
+    isConnected
 } from './core/peer.js';
 import { GameRegistry } from './games/GameRegistry.js';
 import { getBasePath, storeEntryPath } from './ui/url.js';
@@ -57,32 +56,8 @@ const elements = {
     namePanel: document.getElementById('name-panel'),
     playerName: document.getElementById('player-name'),
     menuCodeDisplay: document.getElementById('menu-code-display'),
-    lastModified: document.getElementById('last-modified'),
-    debugLog: document.getElementById('debug-log')
+    lastModified: document.getElementById('last-modified')
 };
-
-// Debug log update interval
-let debugLogInterval = null;
-
-function startDebugLogUpdates() {
-    if (debugLogInterval) return;
-    updateDebugLog();
-    debugLogInterval = setInterval(updateDebugLog, 500);
-}
-
-function stopDebugLogUpdates() {
-    if (debugLogInterval) {
-        clearInterval(debugLogInterval);
-        debugLogInterval = null;
-    }
-}
-
-function updateDebugLog() {
-    if (!elements.debugLog) return;
-    const logs = getDebugLog();
-    elements.debugLog.innerHTML = logs.map(log => `<div>${log}</div>`).join('');
-    elements.debugLog.scrollTop = elements.debugLog.scrollHeight;
-}
 
 // Show last modified timestamp
 if (elements.lastModified) {
@@ -347,12 +322,6 @@ function showScreen(screenName) {
     updateNamePanelVisibility(screenName);
     if (screenName === 'joinScreen') {
         setJoinCodeValue(getKnownCode());
-    }
-    // Start/stop debug log updates on loading screen
-    if (screenName === 'loading') {
-        startDebugLogUpdates();
-    } else {
-        stopDebugLogUpdates();
     }
 }
 

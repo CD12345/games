@@ -33,6 +33,9 @@ export class DebugOverlay {
     }
 
     createUI() {
+        if (this.container) {
+            return;
+        }
         // Main container at bottom of screen
         this.container = document.createElement('div');
         this.container.style.cssText = `
@@ -90,6 +93,9 @@ export class DebugOverlay {
     }
 
     createFullLogOverlay() {
+        if (this.fullLogOverlay) {
+            return;
+        }
         this.fullLogOverlay = document.createElement('div');
         this.fullLogOverlay.style.cssText = `
             position: fixed;
@@ -120,6 +126,24 @@ export class DebugOverlay {
         title.textContent = 'Debug Log';
         title.style.fontWeight = 'bold';
 
+        const actions = document.createElement('div');
+        actions.style.cssText = `
+            display: flex;
+            gap: 8px;
+        `;
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy All';
+        copyBtn.style.cssText = `
+            background: #444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        `;
+        copyBtn.addEventListener('click', () => this.copyAllLogs(copyBtn));
+
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
         closeBtn.style.cssText = `
@@ -132,8 +156,11 @@ export class DebugOverlay {
         `;
         closeBtn.addEventListener('click', () => this.hideFullLog());
 
+        actions.appendChild(copyBtn);
+        actions.appendChild(closeBtn);
+
         header.appendChild(title);
-        header.appendChild(closeBtn);
+        header.appendChild(actions);
 
         // Log content area
         this.fullLogContent = document.createElement('div');
@@ -151,8 +178,7 @@ export class DebugOverlay {
 
     // Log a debug message
     log(message) {
-        if (!this.enabled) return;
-
+        const shouldEnable = getDebugFlag();
         const timestamp = new Date().toLocaleTimeString();
         const entry = { timestamp, message };
         this.logs.push(entry);
@@ -162,14 +188,29 @@ export class DebugOverlay {
             this.logs.shift();
         }
 
+        if (!this.enabled && shouldEnable) {
+            this.enabled = true;
+            this.createUI();
+        }
+
+        if (!this.enabled || !this.logDisplay) {
+            return;
+        }
+
         // Update display with latest message
         this.logDisplay.textContent = message;
     }
 
     // Set the real-time value (not logged)
     setValue(value) {
-        if (!this.enabled) return;
         this.realtimeValue = value;
+        if (!this.enabled && getDebugFlag()) {
+            this.enabled = true;
+            this.createUI();
+        }
+        if (!this.enabled || !this.realtimeDisplay) {
+            return;
+        }
         this.realtimeDisplay.textContent = value;
     }
 
@@ -189,6 +230,58 @@ export class DebugOverlay {
         this.fullLogContent.scrollTop = this.fullLogContent.scrollHeight;
 
         this.fullLogOverlay.style.display = 'flex';
+    }
+
+    copyAllLogs(button) {
+        const logText = this.logs
+            .map(entry => `[${entry.timestamp}] ${entry.message}`)
+            .join('\n');
+        const originalText = button.textContent;
+        const restoreLabel = () => {
+            button.textContent = originalText;
+        };
+
+        const writeFallback = () => {
+            const textarea = document.createElement('textarea');
+            textarea.value = logText;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '-1000px';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        };
+
+        const markCopied = () => {
+            button.textContent = 'Copied!';
+            setTimeout(restoreLabel, 1200);
+        };
+
+        const markFailed = () => {
+            button.textContent = 'Copy failed';
+            setTimeout(restoreLabel, 1200);
+        };
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(logText)
+                    .then(markCopied)
+                    .catch(() => {
+                        try {
+                            writeFallback();
+                            markCopied();
+                        } catch (error) {
+                            markFailed();
+                        }
+                    });
+                return;
+            }
+            writeFallback();
+            markCopied();
+        } catch (error) {
+            markFailed();
+        }
     }
 
     // Hide full log overlay

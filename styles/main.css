@@ -356,29 +356,6 @@ h2 {
     color: var(--text-secondary);
 }
 
-.debug-log {
-    margin-top: 1rem;
-    max-height: 40vh;
-    overflow-y: auto;
-    text-align: left;
-    font-family: monospace;
-    font-size: 0.7rem;
-    color: #888;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 0.5rem;
-    border-radius: 4px;
-    width: 100%;
-}
-
-.debug-log div {
-    padding: 2px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.debug-log div:last-child {
-    border-bottom: none;
-}
-
 /* Responsive adjustments */
 @media (max-height: 600px) {
     #app {
