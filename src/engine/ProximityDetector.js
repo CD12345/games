@@ -1,6 +1,8 @@
 // ProximityDetector - Ultrasonic proximity detection using Web Audio API
 // Emits and detects ultrasonic chirps to estimate distance between devices
 
+import { debugLog, debugSetValue } from '../ui/DebugOverlay.js';
+
 const ULTRASONIC_FREQ = 19000;      // 19kHz - inaudible to most adults
 const CHIRP_DURATION = 0.05;        // 50ms chirp
 const SAMPLE_RATE = 44100;
@@ -127,9 +129,13 @@ export class ProximityDetector {
 
         this.chirpSentTime = performance.now();
         this.pendingChirp = true;
+        debugLog(`Chirp emitted at ${this.chirpSentTime.toFixed(0)}ms`);
 
         // Clear pending after timeout (max reasonable distance)
         setTimeout(() => {
+            if (this.pendingChirp) {
+                debugLog('Chirp timeout - no response detected');
+            }
             this.pendingChirp = false;
         }, 500);
     }
@@ -154,8 +160,11 @@ export class ProximityDetector {
 
             // Chirp detected
             if (maxAmplitude > DETECTION_THRESHOLD) {
-                this.handleChirpDetected();
+                this.handleChirpDetected(maxAmplitude);
             }
+
+            // Show real-time amplitude in debug mode
+            debugSetValue(`19kHz: ${(maxAmplitude * 100).toFixed(0)}%`);
 
             this.detectionLoop = requestAnimationFrame(detect);
         };
@@ -164,12 +173,16 @@ export class ProximityDetector {
     }
 
     // Handle detected chirp
-    handleChirpDetected() {
+    handleChirpDetected(amplitude) {
         const now = performance.now();
 
         // Debounce - ignore detections within 100ms of each other
-        if (now - this.lastChirpTime < 100) return;
+        if (now - this.lastChirpTime < 100) {
+            return;
+        }
         this.lastChirpTime = now;
+
+        debugLog(`Chirp detected! amp=${amplitude.toFixed(2)} pending=${this.pendingChirp}`);
 
         // If we sent a chirp and are waiting for response
         if (this.pendingChirp && this.chirpSentTime > 0) {
@@ -177,9 +190,13 @@ export class ProximityDetector {
             // Divide by 2 for one-way distance
             const distanceFeet = (roundTripMs / 1000) * SPEED_OF_SOUND_FPS / 2;
 
+            debugLog(`Round-trip: ${roundTripMs.toFixed(0)}ms -> ${distanceFeet.toFixed(1)}ft`);
+
             // Sanity check - ignore unrealistic distances
             if (distanceFeet > 0.5 && distanceFeet < 50) {
                 this.updateDistance(distanceFeet);
+            } else {
+                debugLog(`Distance ${distanceFeet.toFixed(1)}ft out of range, ignoring`);
             }
 
             this.pendingChirp = false;
@@ -194,8 +211,11 @@ export class ProximityDetector {
     // Update distance with smoothing
     updateDistance(rawDistance) {
         this.currentDistance = rawDistance;
+        const oldSmoothed = this.smoothedDistance;
         this.smoothedDistance = this.smoothedDistance * (1 - SMOOTHING_FACTOR) +
                                 rawDistance * SMOOTHING_FACTOR;
+
+        debugLog(`Distance: ${rawDistance.toFixed(1)}ft -> smoothed ${this.smoothedDistance.toFixed(1)}ft`);
 
         if (this.onDistanceUpdate) {
             this.onDistanceUpdate(this.smoothedDistance);
