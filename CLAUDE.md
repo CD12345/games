@@ -33,11 +33,14 @@ Open `index.html` for the lobby/menu or `game.html?code=XXXX&host=true&game=pong
 - All P2P messaging uses `sendMessage(type, payload)` / `onMessage(type, handler)` pattern
 
 ### Key Modules
-- **src/core/peer.js**: PeerJS wrapper - connection management, message routing
+- **src/core/peer.js**: PeerJS wrapper - connection management, message routing, TURN server credentials
 - **src/core/gameSession.js**: Session lifecycle - create/join/start/leave game, player tracking
 - **src/engine/GameEngine.js**: Base class with game loop (requestAnimationFrame), delta time, canvas management
 - **src/engine/NetworkSync.js**: State synchronization with interpolation for guests
 - **src/engine/InputManager.js**: Touch, mouse, and keyboard input (Arrow keys/WASD)
+- **src/engine/ProximityDetector.js**: Audio-based distance measurement using DS-TWR algorithm
+- **src/engine/ProximitySync.js**: Network coordination for proximity ranging between devices
+- **src/ui/DebugOverlay.js**: Debug logging overlay (enable with `?debug=1` URL parameter)
 - **src/games/GameRegistry.js**: Plugin system for registering games
 
 ### Adding a New Game
@@ -56,3 +59,31 @@ Open `index.html` for the lobby/menu or `game.html?code=XXXX&host=true&game=pong
 
 ### Coordinate System
 All game coordinates are normalized (0-1 range) and scaled during rendering. This ensures consistent behavior across different screen sizes.
+
+### Proximity Detection (DS-TWR)
+Uses Double-Sided Two-Way Ranging to measure distance between devices via ultrasonic audio chirps (15kHz).
+
+**Half-duplex protocol** - never emit and listen simultaneously:
+- When emitting, ignore all audio detection
+- After emitting, wait 50ms for chirp to end before listening
+- After detecting, wait 50ms before responding (ensures sender's chirp has ended)
+
+**Algorithm flow:**
+1. Host emits chirp (30ms), records T_tx1, enters wait_rx1 state
+2. Guest detects chirp (T_rx1), waits 50ms, then emits response (T_tx1)
+3. Host detects response (T_rx1), waits 50ms, emits chirp 2 (T_tx2)
+4. Guest detects chirp 2 (T_rx2), sends timing data via network
+5. Host calculates: `ToF = [(Tround1 × Tround2) − (Treply1 × Treply2)] / (Tround1 + Tround2 + Treply1 + Treply2)`
+6. Distance = ToF × speed of sound (1125 ft/s)
+
+DS-TWR cancels clock drift errors by using timing measurements from both devices.
+
+### TURN Server Configuration
+P2P connections use Metered.ca TURN servers for NAT traversal. Credentials are fetched dynamically in `src/core/peer.js`. Required for cross-network connections (e.g., phone to PC on different networks).
+
+### Debug Mode
+Add `?debug=1` to any URL to enable the debug overlay:
+- Bottom-left: scrolling log messages
+- Bottom-center: real-time value display (e.g., audio amplitude)
+- Tap log to open full log overlay
+- Use `debugLog(msg)` and `debugSetValue(val)` from `src/ui/DebugOverlay.js`
