@@ -3,11 +3,11 @@
 
 import { debugLog, debugSetValue } from '../ui/DebugOverlay.js';
 
-const ULTRASONIC_FREQ = 19000;      // 19kHz - inaudible to most adults
-const CHIRP_DURATION = 0.05;        // 50ms chirp
+const ULTRASONIC_FREQ = 17000;      // 17kHz - better speaker/mic compatibility
+const CHIRP_DURATION = 0.08;        // 80ms chirp (longer for better detection)
 const SAMPLE_RATE = 44100;
 const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
-const DETECTION_THRESHOLD = 0.15;   // Amplitude threshold for chirp detection
+const DETECTION_THRESHOLD = 0.08;   // Lower threshold for quieter chirps
 const SMOOTHING_FACTOR = 0.3;       // Exponential smoothing for distance
 
 export class ProximityDetector {
@@ -28,6 +28,7 @@ export class ProximityDetector {
         this.lastChirpTime = 0;
         this.pendingChirp = false;
         this.chirpSentTime = 0;
+        this.deafUntil = 0;          // Ignore self-echo until this time
 
         // Callbacks
         this.onDistanceUpdate = null;
@@ -123,10 +124,10 @@ export class ProximityDetector {
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(ULTRASONIC_FREQ, this.audioContext.currentTime);
 
-        // Quick fade in/out to reduce artifacts
+        // Quick fade in/out to reduce artifacts (full volume for better detection)
         gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-        gainNode.gain.linearRampToValueAtTime(0.5, this.audioContext.currentTime + 0.005);
-        gainNode.gain.linearRampToValueAtTime(0.5, this.audioContext.currentTime + CHIRP_DURATION - 0.005);
+        gainNode.gain.linearRampToValueAtTime(1.0, this.audioContext.currentTime + 0.01);
+        gainNode.gain.linearRampToValueAtTime(1.0, this.audioContext.currentTime + CHIRP_DURATION - 0.01);
         gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + CHIRP_DURATION);
 
         oscillator.connect(gainNode);
@@ -137,7 +138,9 @@ export class ProximityDetector {
 
         this.chirpSentTime = performance.now();
         this.pendingChirp = true;
-        debugLog(`Chirp emitted at ${this.chirpSentTime.toFixed(0)}ms`);
+        // Ignore our own echo for 150ms after emitting
+        this.deafUntil = this.chirpSentTime + 150;
+        debugLog(`Chirp emitted, deaf until ${this.deafUntil.toFixed(0)}ms`);
 
         // Clear pending after timeout (max reasonable distance)
         setTimeout(() => {
@@ -166,13 +169,15 @@ export class ProximityDetector {
                 }
             }
 
-            // Chirp detected
-            if (maxAmplitude > DETECTION_THRESHOLD) {
+            // Chirp detected (but ignore self-echo during deaf period)
+            const now = performance.now();
+            if (maxAmplitude > DETECTION_THRESHOLD && now > this.deafUntil) {
                 this.handleChirpDetected(maxAmplitude);
             }
 
             // Show real-time amplitude in debug mode
-            debugSetValue(`19kHz: ${(maxAmplitude * 100).toFixed(0)}%`);
+            const isDeaf = now < this.deafUntil;
+            debugSetValue(`17kHz: ${(maxAmplitude * 100).toFixed(0)}%${isDeaf ? ' (deaf)' : ''}`);
 
             this.detectionLoop = requestAnimationFrame(detect);
         };
