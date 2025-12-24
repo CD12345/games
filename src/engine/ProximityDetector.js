@@ -47,6 +47,15 @@ export class ProximityDetector {
         this.networkLatency = latencyMs;
     }
 
+    // Start a measurement (called by host when sending ping)
+    // We record when we sent the message, then wait for chirp detection
+    startMeasurement(sendTime) {
+        this.chirpSentTime = sendTime;
+        this.pendingChirp = true;
+        this.deafUntil = 0; // Not emitting, so no deaf period needed
+        debugLog(`Measurement started at ${sendTime.toFixed(0)}ms`);
+    }
+
     async start() {
         try {
             // Create audio context
@@ -206,15 +215,16 @@ export class ProximityDetector {
 
         debugLog(`Chirp detected! amp=${amplitude.toFixed(2)} pending=${this.pendingChirp}`);
 
-        // If we sent a chirp and are waiting for response
+        // If we're waiting for a measurement response
         if (this.pendingChirp && this.chirpSentTime > 0) {
-            const rawRoundTripMs = now - this.chirpSentTime;
-            // Subtract network latency (message to peer + response)
-            const compensatedMs = Math.max(0, rawRoundTripMs - (this.networkLatency * 2));
-            // Divide by 2 for one-way distance
-            const distanceFeet = (compensatedMs / 1000) * SPEED_OF_SOUND_FPS / 2;
+            const totalMs = now - this.chirpSentTime;
+            // Subtract ONE-WAY network latency (message goes to peer, chirp comes back via sound)
+            // Flow: send_msg -> [network] -> peer_chirps -> [sound] -> we_detect
+            const soundTravelMs = Math.max(0, totalMs - this.networkLatency);
+            // Sound travel is one-way (peer to us), so no divide by 2
+            const distanceFeet = (soundTravelMs / 1000) * SPEED_OF_SOUND_FPS;
 
-            debugLog(`RTT: ${rawRoundTripMs.toFixed(0)}ms - ${(this.networkLatency * 2).toFixed(0)}ms latency = ${compensatedMs.toFixed(0)}ms -> ${distanceFeet.toFixed(1)}ft`);
+            debugLog(`Total: ${totalMs.toFixed(0)}ms - ${this.networkLatency.toFixed(0)}ms net = ${soundTravelMs.toFixed(0)}ms sound -> ${distanceFeet.toFixed(1)}ft`);
 
             // Sanity check - ignore unrealistic distances
             if (distanceFeet >= 0 && distanceFeet < 50) {
