@@ -50,6 +50,8 @@ const elements = {
     codeDisplay: document.querySelector('.code-display'),
     codeHint: document.querySelector('.code-hint'),
     playerList: document.getElementById('player-list'),
+    gameSettings: document.getElementById('game-settings'),
+    settingsList: document.getElementById('settings-list'),
     btnStartGame: document.getElementById('btn-start-game'),
     loadingMessage: document.getElementById('loading-message'),
     btnJoinOffer: document.getElementById('btn-join-offer'),
@@ -84,6 +86,7 @@ let gameUnsubscribe = null;
 let pendingOffer = null;
 let sessionLinkReady = false;
 let playerName = '';
+let currentSettings = {}; // Current game settings values
 
 const NAME_SCREENS = new Set(['mainMenu', 'joinScreen']);
 const ADJECTIVES = [
@@ -260,7 +263,8 @@ function storeSession() {
     const payload = {
         code: currentGameCode,
         gameType: currentGameType,
-        isHost
+        isHost,
+        settings: currentSettings
     };
 
     sessionStorage.setItem('gameSession', JSON.stringify(payload));
@@ -750,11 +754,18 @@ function enterLobby(gameType) {
     if (gameUnsubscribe) gameUnsubscribe();
     gameUnsubscribe = subscribeToGame(currentGameCode, (gameData) => {
         if (gameData && gameData.status === 'playing') {
+            // Guest receives settings from host via game_start message
+            if (gameData.settings) {
+                currentSettings = gameData.settings;
+            }
             // Game has started - redirect to game page
             storeSession();
             window.location.href = buildGameUrl();
         }
     });
+
+    // Render game settings (host can edit, guest sees read-only)
+    renderSettings(gameType);
 
     showScreen('lobby');
 }
@@ -810,6 +821,94 @@ function updatePlayerList(players) {
     }
 }
 
+// Render game settings in lobby
+function renderSettings(gameType) {
+    const game = GameRegistry.getGame(gameType);
+    const settings = game?.settings || [];
+
+    // Initialize current settings with defaults
+    currentSettings = GameRegistry.getDefaultSettings(gameType);
+
+    if (settings.length === 0) {
+        elements.gameSettings.classList.add('hidden');
+        return;
+    }
+
+    elements.gameSettings.classList.remove('hidden');
+    elements.settingsList.innerHTML = '';
+
+    settings.forEach(setting => {
+        const div = document.createElement('div');
+        div.className = 'setting-item';
+
+        const label = document.createElement('label');
+        label.className = 'setting-label';
+        label.textContent = setting.label;
+        label.setAttribute('for', `setting-${setting.id}`);
+
+        const control = document.createElement('div');
+        control.className = 'setting-control';
+
+        let input;
+        switch (setting.type) {
+            case 'checkbox':
+                const checkboxWrapper = document.createElement('label');
+                checkboxWrapper.className = 'setting-checkbox';
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.id = `setting-${setting.id}`;
+                input.checked = currentSettings[setting.id];
+                input.disabled = !isHost;
+                input.addEventListener('change', () => {
+                    currentSettings[setting.id] = input.checked;
+                });
+                const toggle = document.createElement('span');
+                toggle.className = 'toggle';
+                checkboxWrapper.appendChild(input);
+                checkboxWrapper.appendChild(toggle);
+                control.appendChild(checkboxWrapper);
+                break;
+
+            case 'string':
+                input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'setting-string';
+                input.id = `setting-${setting.id}`;
+                input.value = currentSettings[setting.id] || '';
+                input.disabled = !isHost;
+                input.addEventListener('input', () => {
+                    currentSettings[setting.id] = input.value;
+                });
+                control.appendChild(input);
+                break;
+
+            case 'enum':
+                input = document.createElement('select');
+                input.className = 'setting-enum';
+                input.id = `setting-${setting.id}`;
+                input.disabled = !isHost;
+                (setting.options || []).forEach(option => {
+                    const opt = document.createElement('option');
+                    opt.value = option;
+                    opt.textContent = option;
+                    if (option === currentSettings[setting.id]) {
+                        opt.selected = true;
+                    }
+                    input.appendChild(opt);
+                });
+                input.addEventListener('change', () => {
+                    currentSettings[setting.id] = input.value;
+                });
+                control.appendChild(input);
+                break;
+        }
+
+        div.appendChild(label);
+        div.appendChild(control);
+        elements.settingsList.appendChild(div);
+    });
+}
+
 // Copy code to clipboard
 async function handleCopyCode() {
     try {
@@ -839,7 +938,7 @@ async function handleStartGame() {
         elements.btnStartGame.disabled = true;
         elements.btnStartGame.textContent = 'Starting...';
         storeSession();
-        await startGame(currentGameCode);
+        await startGame(currentGameCode, currentSettings);
 
         // Navigate to game page (host also redirects here)
         window.location.href = buildGameUrl();

@@ -241,7 +241,7 @@ export function leaveGame(options = {}) {
 }
 
 // Start the game (host only)
-export async function startGame(code) {
+export async function startGame(code, settings = {}) {
     if (!currentSession?.isHost) {
         throw new Error('Only the host can start the game');
     }
@@ -260,13 +260,14 @@ export async function startGame(code) {
     const initialState = gameConfig.getInitialState ? gameConfig.getInitialState() : {};
     currentSession.status = 'playing';
     currentSession.initialState = initialState;
+    currentSession.settings = settings;
 
     // Notify guest
-    sendMessage('game_start', { initialState });
+    sendMessage('game_start', { initialState, settings });
 
     // Notify local callback
     if (gameStatusCallback) {
-        gameStatusCallback({ status: 'playing', initialState });
+        gameStatusCallback({ status: 'playing', initialState, settings });
     }
 }
 
