@@ -1,14 +1,24 @@
 // ProximityDetector - Audio-based proximity detection using DS-TWR
 // Uses Double-Sided Two-Way Ranging for accurate distance measurement
+//
+// Half-duplex protocol: never emit and listen simultaneously
+// - When emitting, ignore all detections (isEmitting flag)
+// - After emitting, wait for chirp to end before listening
+// - Before responding, wait for incoming chirp to end
 
 import { debugLog, debugSetValue } from '../ui/DebugOverlay.js';
 
-const CHIRP_FREQ = 15000;           // 15kHz - works on most phone speakers
-const CHIRP_DURATION = 0.04;        // 40ms chirp
+const CHIRP_FREQ = 15000;           // Single frequency for all chirps
+const CHIRP_DURATION_MS = 30;       // 30ms chirp
+const CHIRP_DURATION = 0.03;        // 30ms in seconds for AudioContext
 const SAMPLE_RATE = 44100;
 const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
-const DETECTION_THRESHOLD = 0.06;   // Amplitude threshold for chirp detection
+const DETECTION_THRESHOLD = 0.08;   // Amplitude threshold for chirp detection
 const SMOOTHING_FACTOR = 0.3;       // Exponential smoothing for distance
+
+// Time to wait after detecting a chirp before responding
+// Ensures incoming chirp has fully ended + margin for FFT settling
+const RESPONSE_DELAY_MS = 50;       // ms - wait after detecting before responding
 
 export class ProximityDetector {
     constructor() {
@@ -36,7 +46,8 @@ export class ProximityDetector {
         this.T_rx2_remote = 0;   // Time remote received our second chirp
 
         // State machine for DS-TWR
-        this.rangingState = 'idle';  // idle, wait_rx1, wait_rx2, complete
+        // States: idle, wait_rx1, responding, wait_rx2, sending_chirp2, complete
+        this.rangingState = 'idle';
         this.isInitiator = false;
         this.rangingTimeout = null;  // Timeout to reset stale ranging
 
@@ -49,7 +60,10 @@ export class ProximityDetector {
         this.frequencyData = null;
         this.detectionLoop = null;
         this.lastDetectionTime = 0;
-        this.lastEmitTime = 0;        // For deaf period after emitting
+
+        // Half-duplex state: never emit and listen at same time
+        this.isEmitting = false;      // True while chirp is playing
+        this.emitEndTime = 0;         // When current/last emit will/did end
     }
 
     async start() {
@@ -125,6 +139,7 @@ export class ProximityDetector {
     }
 
     // Emit a chirp and record transmission time
+    // Returns the TX timestamp, or 0 if unable to emit
     emitChirp() {
         if (!this.isAvailable || !this.audioContext) return 0;
 
@@ -154,7 +169,16 @@ export class ProximityDetector {
         oscillator.stop(this.audioContext.currentTime + CHIRP_DURATION);
 
         const txTime = performance.now();
-        this.lastEmitTime = txTime;  // Track for deaf period
+        this.isEmitting = true;
+        this.emitEndTime = txTime + CHIRP_DURATION_MS + 20; // +20ms margin for audio settling
+
+        // Clear isEmitting after chirp ends
+        setTimeout(() => {
+            this.isEmitting = false;
+            debugLog('Chirp complete, now listening');
+        }, CHIRP_DURATION_MS + 20);
+
+        debugLog(`Emit chirp at ${CHIRP_FREQ}Hz, done at ${this.emitEndTime.toFixed(0)}`);
         return txTime;
     }
 
@@ -253,13 +277,21 @@ export class ProximityDetector {
         this.resetRanging();
         this.isInitiator = false;
         this.T_rx1_remote = rxTime;
+        this.rangingState = 'responding'; // Transitional state while waiting to respond
 
-        // Immediately respond with our chirp
-        this.T_tx1_remote = this.emitChirp();
-        this.rangingState = 'wait_rx2';
-        this.setRangingTimeout(300);  // Shorter timeout for responder
+        // Wait for incoming chirp to end, then respond
+        // This ensures half-duplex: we don't emit while they might still be emitting
+        setTimeout(() => {
+            if (this.rangingState !== 'responding') return; // Cancelled
 
-        debugLog(`DS-TWR Responder: Rx1=${rxTime.toFixed(0)}, Tx1=${this.T_tx1_remote.toFixed(0)}`);
+            this.T_tx1_remote = this.emitChirp();
+            this.rangingState = 'wait_rx2';
+            this.setRangingTimeout(400);
+
+            debugLog(`DS-TWR Responder: Rx1=${rxTime.toFixed(0)}, Tx1=${this.T_tx1_remote.toFixed(0)}`);
+        }, RESPONSE_DELAY_MS);
+
+        debugLog(`DS-TWR Responder: Detected chirp 1, will respond in ${RESPONSE_DELAY_MS}ms`);
     }
 
     // Called when responder detects initiator's second chirp
@@ -284,37 +316,56 @@ export class ProximityDetector {
 
     // === Detection Loop ===
 
+    // Helper to get amplitude at the chirp frequency
+    getChirpAmplitude() {
+        const binIndex = Math.round(CHIRP_FREQ / (SAMPLE_RATE / this.analyser.fftSize));
+        let maxAmplitude = 0;
+        for (let i = binIndex - 2; i <= binIndex + 2; i++) {
+            if (i >= 0 && i < this.frequencyData.length) {
+                maxAmplitude = Math.max(maxAmplitude, this.frequencyData[i] / 255);
+            }
+        }
+        return maxAmplitude;
+    }
+
     startDetectionLoop() {
         const detect = () => {
             if (!this.isRunning) return;
 
             this.analyser.getByteFrequencyData(this.frequencyData);
+            const amplitude = this.getChirpAmplitude();
+            const now = performance.now();
 
-            // Find the bin for our chirp frequency
-            const binIndex = Math.round(CHIRP_FREQ / (SAMPLE_RATE / this.analyser.fftSize));
+            // Half-duplex: don't listen while emitting
+            if (this.isEmitting) {
+                debugSetValue(`TX... ${(amplitude * 100).toFixed(0)}%`);
+                this.detectionLoop = requestAnimationFrame(detect);
+                return;
+            }
 
-            // Check bins around target frequency
-            let maxAmplitude = 0;
-            for (let i = binIndex - 2; i <= binIndex + 2; i++) {
-                if (i >= 0 && i < this.frequencyData.length) {
-                    maxAmplitude = Math.max(maxAmplitude, this.frequencyData[i] / 255);
+            // Determine if we should be listening based on state
+            let shouldListen = false;
+            if (this.isInitiator) {
+                // Host: listen for response in wait_rx1 state
+                shouldListen = (this.rangingState === 'wait_rx1');
+            } else {
+                // Guest: listen for chirp1 (idle) or chirp2 (wait_rx2)
+                shouldListen = (this.rangingState === 'idle' || this.rangingState === 'wait_rx2');
+            }
+
+            // Check for chirp detection
+            if (shouldListen && amplitude > DETECTION_THRESHOLD) {
+                // Debounce: don't detect same chirp twice
+                if (now - this.lastDetectionTime > CHIRP_DURATION_MS + 20) {
+                    this.lastDetectionTime = now;
+                    debugLog(`Detected chirp amp=${amplitude.toFixed(2)} state=${this.rangingState}`);
+                    this.handleChirpDetected(now, amplitude);
                 }
             }
 
-            // Chirp detected
-            const now = performance.now();
-            const sinceLast = now - this.lastDetectionTime;
-            const sinceEmit = now - this.lastEmitTime;
-
-            // Ignore if: too soon since last detection, or within deaf period after emitting
-            // Deaf period: 60ms after emit to avoid self-echo (chirp is 40ms + margin)
-            if (maxAmplitude > DETECTION_THRESHOLD && sinceLast > 50 && sinceEmit > 60) {
-                this.lastDetectionTime = now;
-                this.handleChirpDetected(now, maxAmplitude);
-            }
-
             // Show real-time amplitude in debug mode
-            debugSetValue(`${(CHIRP_FREQ/1000).toFixed(0)}kHz: ${(maxAmplitude * 100).toFixed(0)}%`);
+            const stateIndicator = shouldListen ? 'RX' : '--';
+            debugSetValue(`${stateIndicator} ${(CHIRP_FREQ/1000).toFixed(0)}kHz: ${(amplitude * 100).toFixed(0)}%`);
 
             this.detectionLoop = requestAnimationFrame(detect);
         };
@@ -335,12 +386,18 @@ export class ProximityDetector {
             if (this.rangingState === 'wait_rx1') {
                 // Received response to our first chirp
                 this.T_rx1 = rxTime;
-                debugLog(`DS-TWR Initiator: Rx1=${rxTime.toFixed(0)}, sending chirp 2`);
+                this.rangingState = 'sending_chirp2'; // Transitional state
 
-                // Send second chirp
-                this.T_tx2 = this.emitChirp();
-                this.rangingState = 'complete';
-                debugLog(`DS-TWR Initiator: Tx2=${this.T_tx2.toFixed(0)}, waiting for timing data`);
+                debugLog(`DS-TWR Initiator: Rx1=${rxTime.toFixed(0)}, will send chirp 2 in ${RESPONSE_DELAY_MS}ms`);
+
+                // Wait for response chirp to end, then send chirp 2
+                setTimeout(() => {
+                    if (this.rangingState !== 'sending_chirp2') return; // Cancelled
+
+                    this.T_tx2 = this.emitChirp();
+                    this.rangingState = 'complete';
+                    debugLog(`DS-TWR Initiator: Tx2=${this.T_tx2.toFixed(0)}, waiting for timing data`);
+                }, RESPONSE_DELAY_MS);
             }
         }
         // Responder handling is done via explicit method calls from ProximitySync
