@@ -81,29 +81,6 @@ body {
     padding: 2rem;
 }
 
-.debug-log {
-    margin-top: 1rem;
-    max-height: 40vh;
-    overflow-y: auto;
-    text-align: left;
-    font-family: monospace;
-    font-size: 0.7rem;
-    color: #888;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 0.5rem;
-    border-radius: 4px;
-    max-width: 90vw;
-}
-
-.debug-log div {
-    padding: 2px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.debug-log div:last-child {
-    border-bottom: none;
-}
-
 .error-content h2 {
     margin-bottom: 1rem;
     color: #ef4444;

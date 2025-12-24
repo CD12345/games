@@ -3,6 +3,8 @@
 
 // PeerJS is loaded from CDN in HTML
 
+import { debugLog as overlayDebugLog } from '../ui/DebugOverlay.js';
+
 let peer = null;
 let currentConnection = null;
 let isHost = false;
@@ -18,6 +20,7 @@ export function addDebugLog(message) {
     const entry = `[${timestamp}] ${message}`;
     debugLog.push(entry);
     console.log('PEER:', message);
+    overlayDebugLog(message);
     if (debugLog.length > MAX_DEBUG_ENTRIES) {
         debugLog.shift();
     }
