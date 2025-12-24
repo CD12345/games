@@ -1,11 +1,11 @@
-// ProximitySync - Network coordination for proximity measurement
-// Coordinates chirp timing between peers to measure distance
+// ProximitySync - Network coordination for proximity measurement using DS-TWR
+// Uses Double-Sided Two-Way Ranging for accurate distance measurement
 
 import { onMessage, offMessage, sendMessage } from '../core/peer.js';
 import { ProximityDetector } from './ProximityDetector.js';
 import { debugLog } from '../ui/DebugOverlay.js';
 
-const PING_INTERVAL = 500;          // Send ping every 500ms
+const RANGING_INTERVAL = 1000;      // Start ranging every 1 second
 const DEFAULT_DISTANCE = 6;         // Default distance in feet when unavailable
 
 export class ProximitySync {
@@ -14,16 +14,10 @@ export class ProximitySync {
         this.detector = new ProximityDetector();
 
         this.isRunning = false;
-        this.pingInterval = null;
+        this.rangingInterval = null;
 
         // Distance state
-        this.localDistance = DEFAULT_DISTANCE;
-        this.remoteDistance = DEFAULT_DISTANCE;
         this.consensusDistance = DEFAULT_DISTANCE;
-
-        // Network latency compensation
-        this.networkLatency = 0;
-        this.latencyPingTime = 0;
 
         // Callbacks
         this.onDistanceChange = null;
@@ -33,107 +27,83 @@ export class ProximitySync {
         // Start the detector
         const available = await this.detector.start();
 
-        // Set up detector callbacks (only host measures distance)
-        if (this.isHost) {
-            this.detector.onDistanceUpdate = (distance) => {
-                this.localDistance = distance;
-                this.updateConsensus();
-                // Share our measurement with peer
-                sendMessage('proximity_update', { distance });
+        // Set up detector callbacks
+        this.detector.onDistanceUpdate = (distance) => {
+            this.consensusDistance = distance;
+            if (this.onDistanceChange) {
+                this.onDistanceChange(distance);
+            }
+        };
+
+        // Guest: Handle chirp detection to respond in DS-TWR sequence
+        if (!this.isHost) {
+            this.detector.onChirpDetected = (rxTime, amplitude) => {
+                // Guest detected a chirp from host
+                if (this.detector.rangingState === 'idle') {
+                    // First chirp from initiator - start responding
+                    this.detector.handleInitiatorChirp1(rxTime);
+                } else if (this.detector.rangingState === 'wait_rx2') {
+                    // Second chirp from initiator - complete and send timing
+                    const timingData = this.detector.handleInitiatorChirp2(rxTime);
+                    if (timingData) {
+                        sendMessage('proximity_timing', timingData);
+                        debugLog('DS-TWR: Sent timing data to host');
+                    }
+                }
             };
         }
 
-        // Guest doesn't need onChirpDetected - it just emits when pinged
-
-        // Listen for peer's proximity updates
-        onMessage('proximity_update', (data) => {
-            if (data && typeof data.distance === 'number') {
-                this.remoteDistance = data.distance;
-                this.updateConsensus();
-            }
-        });
-
-        // Listen for ping requests (host initiates)
-        onMessage('proximity_ping', (data) => {
-            // Respond immediately for latency measurement
-            sendMessage('proximity_pong', { timestamp: data?.timestamp });
-            // Then emit chirp
-            if (this.detector.getIsAvailable()) {
-                this.detector.emitChirp();
-            }
-        });
-
-        // Listen for pong responses (for latency measurement)
-        onMessage('proximity_pong', (data) => {
-            if (data?.timestamp && this.latencyPingTime > 0) {
-                const rtt = performance.now() - this.latencyPingTime;
-                this.networkLatency = rtt / 2; // One-way latency
-                this.detector.setNetworkLatency(this.networkLatency);
-                debugLog(`Network latency: ${this.networkLatency.toFixed(0)}ms`);
+        // Host: Listen for timing data from guest to complete ranging
+        onMessage('proximity_timing', (data) => {
+            if (this.isHost && data) {
+                this.detector.completeRanging(data);
             }
         });
 
         this.isRunning = true;
 
-        // Host initiates periodic pings
+        // Host initiates periodic ranging
         if (this.isHost && available) {
-            this.startPinging();
+            this.startRanging();
         }
 
-        console.log('ProximitySync started, available:', available);
+        console.log('ProximitySync started with DS-TWR, available:', available);
         return available;
     }
 
     stop() {
         this.isRunning = false;
 
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
+        if (this.rangingInterval) {
+            clearInterval(this.rangingInterval);
+            this.rangingInterval = null;
         }
 
-        offMessage('proximity_update');
-        offMessage('proximity_ping');
-        offMessage('proximity_pong');
+        offMessage('proximity_timing');
 
         this.detector.stop();
         console.log('ProximitySync stopped');
     }
 
-    // Host periodically initiates distance measurement
-    // Flow: Host sends message -> Guest chirps -> Host detects chirp
-    // Distance = (detection_time - send_time - network_latency) * speed_of_sound
-    startPinging() {
-        this.pingInterval = setInterval(() => {
+    // Host periodically initiates DS-TWR ranging sequence
+    // Flow:
+    //   1. Host emits chirp 1, records T_tx1
+    //   2. Guest detects chirp 1 (T_rx1), immediately responds with chirp (T_tx1)
+    //   3. Host detects response (T_rx1), emits chirp 2 (T_tx2)
+    //   4. Guest detects chirp 2 (T_rx2), sends timing data via network
+    //   5. Host calculates distance using DS-TWR formula
+    startRanging() {
+        this.rangingInterval = setInterval(() => {
             if (!this.isRunning) return;
+            if (this.detector.rangingState !== 'idle') {
+                debugLog('DS-TWR: Previous ranging still in progress');
+                return;
+            }
 
-            // Record send time and set pending BEFORE sending
-            this.latencyPingTime = performance.now();
-            this.detector.startMeasurement(this.latencyPingTime);
+            // Start DS-TWR sequence as initiator
+            this.detector.startRanging();
 
-            // Tell guest to chirp NOW
-            sendMessage('proximity_ping', { timestamp: this.latencyPingTime });
-
-        }, PING_INTERVAL);
-    }
-
-    // Update consensus distance from both measurements
-    updateConsensus() {
-        // Average both measurements if both available
-        if (this.detector.getIsAvailable()) {
-            // Weight local measurement more if remote seems stale
-            this.consensusDistance = (this.localDistance + this.remoteDistance) / 2;
-        } else {
-            // Use remote if local unavailable
-            this.consensusDistance = this.remoteDistance;
-        }
-
-        // Clamp to reasonable range
-        this.consensusDistance = Math.max(0.5, Math.min(50, this.consensusDistance));
-
-        if (this.onDistanceChange) {
-            this.onDistanceChange(this.consensusDistance);
-        }
+        }, RANGING_INTERVAL);
     }
 
     // Get current distance estimate
