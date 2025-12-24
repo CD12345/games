@@ -1,13 +1,13 @@
-// ProximityDetector - Ultrasonic proximity detection using Web Audio API
-// Emits and detects ultrasonic chirps to estimate distance between devices
+// ProximityDetector - Audio-based proximity detection using DS-TWR
+// Uses Double-Sided Two-Way Ranging for accurate distance measurement
 
 import { debugLog, debugSetValue } from '../ui/DebugOverlay.js';
 
-const ULTRASONIC_FREQ = 15000;      // 15kHz - works on most phone speakers
-const CHIRP_DURATION = 0.04;        // 40ms chirp (shorter = less audible)
+const CHIRP_FREQ = 15000;           // 15kHz - works on most phone speakers
+const CHIRP_DURATION = 0.04;        // 40ms chirp
 const SAMPLE_RATE = 44100;
 const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
-const DETECTION_THRESHOLD = 0.06;   // Lower threshold for detection
+const DETECTION_THRESHOLD = 0.06;   // Amplitude threshold for chirp detection
 const SMOOTHING_FACTOR = 0.3;       // Exponential smoothing for distance
 
 export class ProximityDetector {
@@ -21,39 +21,35 @@ export class ProximityDetector {
         this.isAvailable = false;
 
         // Distance estimation
-        this.currentDistance = 6;       // Default 6 feet (fallback)
+        this.currentDistance = 6;       // Default 6 feet
         this.smoothedDistance = 6;
 
-        // Chirp timing
-        this.lastChirpTime = 0;
-        this.pendingChirp = false;
-        this.chirpSentTime = 0;
-        this.deafUntil = 0;          // Ignore self-echo until this time
+        // DS-TWR timestamps (all in performance.now() milliseconds)
+        // For initiator (host):
+        this.T_tx1 = 0;    // Time we sent first chirp
+        this.T_rx1 = 0;    // Time we received response chirp
+        this.T_tx2 = 0;    // Time we sent second chirp
+
+        // For responder (guest):
+        this.T_rx1_remote = 0;   // Time remote received our first chirp
+        this.T_tx1_remote = 0;   // Time remote sent response chirp
+        this.T_rx2_remote = 0;   // Time remote received our second chirp
+
+        // State machine for DS-TWR
+        this.rangingState = 'idle';  // idle, wait_rx1, wait_rx2, complete
+        this.isInitiator = false;
+        this.rangingTimeout = null;  // Timeout to reset stale ranging
 
         // Callbacks
         this.onDistanceUpdate = null;
-        this.onChirpDetected = null;
+        this.onChirpDetected = null;   // Called when any chirp is detected
+        this.onRangingComplete = null; // Called with timing data for responder
 
         // Detection buffers
         this.frequencyData = null;
         this.detectionLoop = null;
-
-        // Network latency compensation (set by ProximitySync)
-        this.networkLatency = 0;
-    }
-
-    // Set network latency for compensation
-    setNetworkLatency(latencyMs) {
-        this.networkLatency = latencyMs;
-    }
-
-    // Start a measurement (called by host when sending ping)
-    // We record when we sent the message, then wait for chirp detection
-    startMeasurement(sendTime) {
-        this.chirpSentTime = sendTime;
-        this.pendingChirp = true;
-        this.deafUntil = 0; // Not emitting, so no deaf period needed
-        debugLog(`Measurement started at ${sendTime.toFixed(0)}ms`);
+        this.lastDetectionTime = 0;
+        this.lastEmitTime = 0;        // For deaf period after emitting
     }
 
     async start() {
@@ -89,12 +85,12 @@ export class ProximityDetector {
             // Start detection loop
             this.startDetectionLoop();
 
-            debugLog(`ProximityDetector started, AudioContext state: ${this.audioContext.state}`);
-            console.log('ProximityDetector started');
+            debugLog(`ProximityDetector started, AudioContext: ${this.audioContext.state}`);
             return true;
 
         } catch (error) {
             console.warn('ProximityDetector unavailable:', error.message);
+            debugLog(`ProximityDetector error: ${error.message}`);
             this.isAvailable = false;
             this.isRunning = false;
             return false;
@@ -109,6 +105,11 @@ export class ProximityDetector {
             this.detectionLoop = null;
         }
 
+        if (this.rangingTimeout) {
+            clearTimeout(this.rangingTimeout);
+            this.rangingTimeout = null;
+        }
+
         if (this.mediaStream) {
             this.mediaStream.getTracks().forEach(track => track.stop());
             this.mediaStream = null;
@@ -121,27 +122,26 @@ export class ProximityDetector {
 
         this.analyser = null;
         this.microphone = null;
-        console.log('ProximityDetector stopped');
     }
 
-    // Emit an ultrasonic chirp
+    // Emit a chirp and record transmission time
     emitChirp() {
-        if (!this.isAvailable || !this.audioContext) return;
+        if (!this.isAvailable || !this.audioContext) return 0;
 
         // Ensure AudioContext is running (iOS requires user interaction)
         if (this.audioContext.state === 'suspended') {
             debugLog('AudioContext suspended, resuming...');
             this.audioContext.resume();
-            return; // Skip this chirp, will work on next one
+            return 0;
         }
 
         const oscillator = this.audioContext.createOscillator();
         const gainNode = this.audioContext.createGain();
 
         oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(ULTRASONIC_FREQ, this.audioContext.currentTime);
+        oscillator.frequency.setValueAtTime(CHIRP_FREQ, this.audioContext.currentTime);
 
-        // Quick fade in/out, moderate volume (0.3 = less audible but still detectable)
+        // Quick fade in/out
         gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
         gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 0.005);
         gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + CHIRP_DURATION - 0.005);
@@ -153,33 +153,147 @@ export class ProximityDetector {
         oscillator.start(this.audioContext.currentTime);
         oscillator.stop(this.audioContext.currentTime + CHIRP_DURATION);
 
-        this.chirpSentTime = performance.now();
-        this.pendingChirp = true;
-        // Ignore our own echo for just 30ms (chirp duration + buffer)
-        // Response from other device arrives after ~50-100ms (network + sound)
-        this.deafUntil = this.chirpSentTime + 30;
-        debugLog(`Chirp emitted at ${this.chirpSentTime.toFixed(0)}ms`);
-
-        // Clear pending after timeout (max reasonable distance)
-        setTimeout(() => {
-            if (this.pendingChirp) {
-                debugLog('Chirp timeout - no response detected');
-            }
-            this.pendingChirp = false;
-        }, 500);
+        const txTime = performance.now();
+        this.lastEmitTime = txTime;  // Track for deaf period
+        return txTime;
     }
 
-    // Start the detection loop
+    // Reset ranging state and clear timeout
+    resetRanging() {
+        if (this.rangingTimeout) {
+            clearTimeout(this.rangingTimeout);
+            this.rangingTimeout = null;
+        }
+        this.rangingState = 'idle';
+        this.isInitiator = false;
+    }
+
+    // Set timeout to auto-reset if ranging doesn't complete
+    setRangingTimeout(timeoutMs = 500) {
+        if (this.rangingTimeout) {
+            clearTimeout(this.rangingTimeout);
+        }
+        this.rangingTimeout = setTimeout(() => {
+            if (this.rangingState !== 'idle') {
+                debugLog(`DS-TWR: Timeout in state ${this.rangingState}, resetting`);
+                this.resetRanging();
+            }
+        }, timeoutMs);
+    }
+
+    // === DS-TWR Initiator (Host) Methods ===
+
+    // Start a DS-TWR ranging sequence as initiator
+    startRanging() {
+        this.resetRanging();
+        this.isInitiator = true;
+        this.rangingState = 'wait_rx1';
+        this.T_tx1 = this.emitChirp();
+        this.setRangingTimeout(500);
+        debugLog(`DS-TWR: Sent chirp 1 at ${this.T_tx1.toFixed(0)}ms, waiting for response`);
+    }
+
+    // Called when we receive timing data from responder
+    completeRanging(remoteData) {
+        if (!this.isInitiator || this.rangingState !== 'complete') {
+            debugLog('DS-TWR: Not ready to complete ranging');
+            return;
+        }
+
+        // Clear timeout since we got the data
+        if (this.rangingTimeout) {
+            clearTimeout(this.rangingTimeout);
+            this.rangingTimeout = null;
+        }
+
+        this.T_rx1_remote = remoteData.T_rx1;
+        this.T_tx1_remote = remoteData.T_tx1;
+        this.T_rx2_remote = remoteData.T_rx2;
+
+        // Calculate using DS-TWR formula
+        // Tround1 = T_rx1 - T_tx1 (our first round trip)
+        // Treply1 = T_tx1_remote - T_rx1_remote (their reply delay)
+        // Tround2 = T_rx2_remote - T_tx1_remote (their second round trip)
+        // Treply2 = T_tx2 - T_rx1 (our reply delay)
+
+        const Tround1 = this.T_rx1 - this.T_tx1;
+        const Treply1 = this.T_tx1_remote - this.T_rx1_remote;
+        const Tround2 = this.T_rx2_remote - this.T_tx1_remote;
+        const Treply2 = this.T_tx2 - this.T_rx1;
+
+        // ToF = [(Tround1 × Tround2) − (Treply1 × Treply2)] / (Tround1 + Tround2 + Treply1 + Treply2)
+        const numerator = (Tround1 * Tround2) - (Treply1 * Treply2);
+        const denominator = Tround1 + Tround2 + Treply1 + Treply2;
+
+        if (denominator <= 0) {
+            debugLog('DS-TWR: Invalid timing data');
+            this.rangingState = 'idle';
+            return;
+        }
+
+        const tofMs = numerator / denominator;
+        const distanceFeet = (tofMs / 1000) * SPEED_OF_SOUND_FPS;
+
+        debugLog(`DS-TWR: Tr1=${Tround1.toFixed(0)} Tp1=${Treply1.toFixed(0)} Tr2=${Tround2.toFixed(0)} Tp2=${Treply2.toFixed(0)}`);
+        debugLog(`DS-TWR: ToF=${tofMs.toFixed(1)}ms -> ${distanceFeet.toFixed(1)}ft`);
+
+        if (distanceFeet >= 0 && distanceFeet < 50) {
+            this.updateDistance(distanceFeet);
+        } else {
+            debugLog(`DS-TWR: Distance ${distanceFeet.toFixed(1)}ft out of range`);
+        }
+
+        this.rangingState = 'idle';
+    }
+
+    // === DS-TWR Responder (Guest) Methods ===
+
+    // Called when responder detects initiator's first chirp
+    handleInitiatorChirp1(rxTime) {
+        this.resetRanging();
+        this.isInitiator = false;
+        this.T_rx1_remote = rxTime;
+
+        // Immediately respond with our chirp
+        this.T_tx1_remote = this.emitChirp();
+        this.rangingState = 'wait_rx2';
+        this.setRangingTimeout(300);  // Shorter timeout for responder
+
+        debugLog(`DS-TWR Responder: Rx1=${rxTime.toFixed(0)}, Tx1=${this.T_tx1_remote.toFixed(0)}`);
+    }
+
+    // Called when responder detects initiator's second chirp
+    handleInitiatorChirp2(rxTime) {
+        if (this.rangingState !== 'wait_rx2') return null;
+
+        this.T_rx2_remote = rxTime;
+
+        debugLog(`DS-TWR Responder: Rx2=${rxTime.toFixed(0)}, sending timing data`);
+
+        // Save timing data before resetting
+        const timingData = {
+            T_rx1: this.T_rx1_remote,
+            T_tx1: this.T_tx1_remote,
+            T_rx2: this.T_rx2_remote
+        };
+
+        this.resetRanging();  // Back to idle, ready for next round
+
+        return timingData;
+    }
+
+    // === Detection Loop ===
+
     startDetectionLoop() {
         const detect = () => {
             if (!this.isRunning) return;
 
             this.analyser.getByteFrequencyData(this.frequencyData);
 
-            // Find the bin for our ultrasonic frequency
-            const binIndex = Math.round(ULTRASONIC_FREQ / (SAMPLE_RATE / this.analyser.fftSize));
+            // Find the bin for our chirp frequency
+            const binIndex = Math.round(CHIRP_FREQ / (SAMPLE_RATE / this.analyser.fftSize));
 
-            // Check a few bins around our target frequency
+            // Check bins around target frequency
             let maxAmplitude = 0;
             for (let i = binIndex - 2; i <= binIndex + 2; i++) {
                 if (i >= 0 && i < this.frequencyData.length) {
@@ -187,15 +301,20 @@ export class ProximityDetector {
                 }
             }
 
-            // Chirp detected (but ignore self-echo during deaf period)
+            // Chirp detected
             const now = performance.now();
-            if (maxAmplitude > DETECTION_THRESHOLD && now > this.deafUntil) {
-                this.handleChirpDetected(maxAmplitude);
+            const sinceLast = now - this.lastDetectionTime;
+            const sinceEmit = now - this.lastEmitTime;
+
+            // Ignore if: too soon since last detection, or within deaf period after emitting
+            // Deaf period: 60ms after emit to avoid self-echo (chirp is 40ms + margin)
+            if (maxAmplitude > DETECTION_THRESHOLD && sinceLast > 50 && sinceEmit > 60) {
+                this.lastDetectionTime = now;
+                this.handleChirpDetected(now, maxAmplitude);
             }
 
             // Show real-time amplitude in debug mode
-            const isDeaf = now < this.deafUntil;
-            debugSetValue(`15kHz: ${(maxAmplitude * 100).toFixed(0)}%${isDeaf ? ' (deaf)' : ''}`);
+            debugSetValue(`${(CHIRP_FREQ/1000).toFixed(0)}kHz: ${(maxAmplitude * 100).toFixed(0)}%`);
 
             this.detectionLoop = requestAnimationFrame(detect);
         };
@@ -203,49 +322,33 @@ export class ProximityDetector {
         detect();
     }
 
-    // Handle detected chirp
-    handleChirpDetected(amplitude) {
-        const now = performance.now();
+    handleChirpDetected(rxTime, amplitude) {
+        debugLog(`Chirp detected! amp=${amplitude.toFixed(2)} state=${this.rangingState}`);
 
-        // Debounce - ignore detections within 100ms of each other
-        if (now - this.lastChirpTime < 100) {
-            return;
-        }
-        this.lastChirpTime = now;
-
-        debugLog(`Chirp detected! amp=${amplitude.toFixed(2)} pending=${this.pendingChirp}`);
-
-        // If we're waiting for a measurement response
-        if (this.pendingChirp && this.chirpSentTime > 0) {
-            const totalMs = now - this.chirpSentTime;
-            // Subtract ONE-WAY network latency (message goes to peer, chirp comes back via sound)
-            // Flow: send_msg -> [network] -> peer_chirps -> [sound] -> we_detect
-            const soundTravelMs = Math.max(0, totalMs - this.networkLatency);
-            // Sound travel is one-way (peer to us), so no divide by 2
-            const distanceFeet = (soundTravelMs / 1000) * SPEED_OF_SOUND_FPS;
-
-            debugLog(`Total: ${totalMs.toFixed(0)}ms - ${this.networkLatency.toFixed(0)}ms net = ${soundTravelMs.toFixed(0)}ms sound -> ${distanceFeet.toFixed(1)}ft`);
-
-            // Sanity check - ignore unrealistic distances
-            if (distanceFeet >= 0 && distanceFeet < 50) {
-                this.updateDistance(distanceFeet);
-            } else {
-                debugLog(`Distance ${distanceFeet.toFixed(1)}ft out of range, ignoring`);
-            }
-
-            this.pendingChirp = false;
-        }
-
-        // Notify callback (for sync coordination)
+        // Notify callback for external handling
         if (this.onChirpDetected) {
-            this.onChirpDetected(now);
+            this.onChirpDetected(rxTime, amplitude);
         }
+
+        // Handle based on current ranging state
+        if (this.isInitiator) {
+            if (this.rangingState === 'wait_rx1') {
+                // Received response to our first chirp
+                this.T_rx1 = rxTime;
+                debugLog(`DS-TWR Initiator: Rx1=${rxTime.toFixed(0)}, sending chirp 2`);
+
+                // Send second chirp
+                this.T_tx2 = this.emitChirp();
+                this.rangingState = 'complete';
+                debugLog(`DS-TWR Initiator: Tx2=${this.T_tx2.toFixed(0)}, waiting for timing data`);
+            }
+        }
+        // Responder handling is done via explicit method calls from ProximitySync
     }
 
     // Update distance with smoothing
     updateDistance(rawDistance) {
         this.currentDistance = rawDistance;
-        const oldSmoothed = this.smoothedDistance;
         this.smoothedDistance = this.smoothedDistance * (1 - SMOOTHING_FACTOR) +
                                 rawDistance * SMOOTHING_FACTOR;
 
@@ -256,18 +359,11 @@ export class ProximityDetector {
         }
     }
 
-    // Get current distance estimate (feet)
     getDistance() {
         return this.smoothedDistance;
     }
 
-    // Check if proximity detection is available
     getIsAvailable() {
         return this.isAvailable;
-    }
-
-    // Set distance externally (from network sync)
-    setDistance(distance) {
-        this.updateDistance(distance);
     }
 }

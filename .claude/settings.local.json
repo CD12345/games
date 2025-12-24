@@ -8,7 +8,8 @@
       "Bash(git commit -m \"Add explicit STUN servers for cross-device WebRTC connections\n\n$\\(cat <<''EOF''\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git push)",
       "Bash(git commit -m \"Add TURN servers for NAT traversal\n\n$\\(cat <<''EOF''\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git commit -m \"Reduce deaf period from 150ms to 30ms\n\n$\\(cat <<''EOF''\n- 150ms was too long, missing response chirps\n- 30ms is enough to block self-echo \\(chirp is 80ms but detected earlier\\)\n- Response should arrive at ~50-100ms \\(network + sound travel\\)\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"Reduce deaf period from 150ms to 30ms\n\n$\\(cat <<''EOF''\n- 150ms was too long, missing response chirps\n- 30ms is enough to block self-echo \\(chirp is 80ms but detected earlier\\)\n- Response should arrive at ~50-100ms \\(network + sound travel\\)\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebFetch(domain:onlinedocs.microchip.com)"
     ]
   }
 }
