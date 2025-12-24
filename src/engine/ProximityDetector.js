@@ -3,11 +3,11 @@
 
 import { debugLog, debugSetValue } from '../ui/DebugOverlay.js';
 
-const ULTRASONIC_FREQ = 17000;      // 17kHz - better speaker/mic compatibility
-const CHIRP_DURATION = 0.08;        // 80ms chirp (longer for better detection)
+const ULTRASONIC_FREQ = 15000;      // 15kHz - works on most phone speakers
+const CHIRP_DURATION = 0.04;        // 40ms chirp (shorter = less audible)
 const SAMPLE_RATE = 44100;
 const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
-const DETECTION_THRESHOLD = 0.08;   // Lower threshold for quieter chirps
+const DETECTION_THRESHOLD = 0.06;   // Lower threshold for detection
 const SMOOTHING_FACTOR = 0.3;       // Exponential smoothing for distance
 
 export class ProximityDetector {
@@ -80,6 +80,7 @@ export class ProximityDetector {
             // Start detection loop
             this.startDetectionLoop();
 
+            debugLog(`ProximityDetector started, AudioContext state: ${this.audioContext.state}`);
             console.log('ProximityDetector started');
             return true;
 
@@ -118,16 +119,23 @@ export class ProximityDetector {
     emitChirp() {
         if (!this.isAvailable || !this.audioContext) return;
 
+        // Ensure AudioContext is running (iOS requires user interaction)
+        if (this.audioContext.state === 'suspended') {
+            debugLog('AudioContext suspended, resuming...');
+            this.audioContext.resume();
+            return; // Skip this chirp, will work on next one
+        }
+
         const oscillator = this.audioContext.createOscillator();
         const gainNode = this.audioContext.createGain();
 
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(ULTRASONIC_FREQ, this.audioContext.currentTime);
 
-        // Quick fade in/out to reduce artifacts (full volume for better detection)
+        // Quick fade in/out, moderate volume (0.3 = less audible but still detectable)
         gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-        gainNode.gain.linearRampToValueAtTime(1.0, this.audioContext.currentTime + 0.01);
-        gainNode.gain.linearRampToValueAtTime(1.0, this.audioContext.currentTime + CHIRP_DURATION - 0.01);
+        gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 0.005);
+        gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + CHIRP_DURATION - 0.005);
         gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + CHIRP_DURATION);
 
         oscillator.connect(gainNode);
@@ -178,7 +186,7 @@ export class ProximityDetector {
 
             // Show real-time amplitude in debug mode
             const isDeaf = now < this.deafUntil;
-            debugSetValue(`17kHz: ${(maxAmplitude * 100).toFixed(0)}%${isDeaf ? ' (deaf)' : ''}`);
+            debugSetValue(`15kHz: ${(maxAmplitude * 100).toFixed(0)}%${isDeaf ? ' (deaf)' : ''}`);
 
             this.detectionLoop = requestAnimationFrame(detect);
         };
