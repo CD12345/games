@@ -3,6 +3,7 @@
 
 import { onMessage, offMessage, sendMessage } from '../core/peer.js';
 import { ProximityDetector } from './ProximityDetector.js';
+import { debugLog } from '../ui/DebugOverlay.js';
 
 const PING_INTERVAL = 500;          // Send ping every 500ms
 const DEFAULT_DISTANCE = 6;         // Default distance in feet when unavailable
@@ -19,6 +20,10 @@ export class ProximitySync {
         this.localDistance = DEFAULT_DISTANCE;
         this.remoteDistance = DEFAULT_DISTANCE;
         this.consensusDistance = DEFAULT_DISTANCE;
+
+        // Network latency compensation
+        this.networkLatency = 0;
+        this.latencyPingTime = 0;
 
         // Callbacks
         this.onDistanceChange = null;
@@ -55,10 +60,22 @@ export class ProximitySync {
         });
 
         // Listen for ping requests (host initiates)
-        onMessage('proximity_ping', () => {
-            // Respond with a chirp
+        onMessage('proximity_ping', (data) => {
+            // Respond immediately for latency measurement
+            sendMessage('proximity_pong', { timestamp: data?.timestamp });
+            // Then emit chirp
             if (this.detector.getIsAvailable()) {
                 this.detector.emitChirp();
+            }
+        });
+
+        // Listen for pong responses (for latency measurement)
+        onMessage('proximity_pong', (data) => {
+            if (data?.timestamp && this.latencyPingTime > 0) {
+                const rtt = performance.now() - this.latencyPingTime;
+                this.networkLatency = rtt / 2; // One-way latency
+                this.detector.setNetworkLatency(this.networkLatency);
+                debugLog(`Network latency: ${this.networkLatency.toFixed(0)}ms`);
             }
         });
 
@@ -83,6 +100,7 @@ export class ProximitySync {
 
         offMessage('proximity_update');
         offMessage('proximity_ping');
+        offMessage('proximity_pong');
 
         this.detector.stop();
         console.log('ProximitySync stopped');
@@ -93,8 +111,11 @@ export class ProximitySync {
         this.pingInterval = setInterval(() => {
             if (!this.isRunning) return;
 
-            // Tell guest we're about to chirp
-            sendMessage('proximity_ping', {});
+            // Record time for latency measurement
+            this.latencyPingTime = performance.now();
+
+            // Tell guest we're about to chirp (include timestamp for latency calc)
+            sendMessage('proximity_ping', { timestamp: this.latencyPingTime });
 
             // Emit our chirp after short delay
             setTimeout(() => {

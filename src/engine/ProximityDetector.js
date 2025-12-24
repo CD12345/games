@@ -36,6 +36,14 @@ export class ProximityDetector {
         // Detection buffers
         this.frequencyData = null;
         this.detectionLoop = null;
+
+        // Network latency compensation (set by ProximitySync)
+        this.networkLatency = 0;
+    }
+
+    // Set network latency for compensation
+    setNetworkLatency(latencyMs) {
+        this.networkLatency = latencyMs;
     }
 
     async start() {
@@ -186,14 +194,16 @@ export class ProximityDetector {
 
         // If we sent a chirp and are waiting for response
         if (this.pendingChirp && this.chirpSentTime > 0) {
-            const roundTripMs = now - this.chirpSentTime;
+            const rawRoundTripMs = now - this.chirpSentTime;
+            // Subtract network latency (message to peer + response)
+            const compensatedMs = Math.max(0, rawRoundTripMs - (this.networkLatency * 2));
             // Divide by 2 for one-way distance
-            const distanceFeet = (roundTripMs / 1000) * SPEED_OF_SOUND_FPS / 2;
+            const distanceFeet = (compensatedMs / 1000) * SPEED_OF_SOUND_FPS / 2;
 
-            debugLog(`Round-trip: ${roundTripMs.toFixed(0)}ms -> ${distanceFeet.toFixed(1)}ft`);
+            debugLog(`RTT: ${rawRoundTripMs.toFixed(0)}ms - ${(this.networkLatency * 2).toFixed(0)}ms latency = ${compensatedMs.toFixed(0)}ms -> ${distanceFeet.toFixed(1)}ft`);
 
             // Sanity check - ignore unrealistic distances
-            if (distanceFeet > 0.5 && distanceFeet < 50) {
+            if (distanceFeet >= 0 && distanceFeet < 50) {
                 this.updateDistance(distanceFeet);
             } else {
                 debugLog(`Distance ${distanceFeet.toFixed(1)}ft out of range, ignoring`);
