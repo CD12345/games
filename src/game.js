@@ -37,6 +37,7 @@ const gameCodeDisplay = document.getElementById('game-code-display');
 // State
 let gameCode = null;
 let isHost = false;
+let gameSettings = {};
 let gameInstance = null;
 let responsiveCanvas = null;
 let reconnectTimer = null;
@@ -270,6 +271,7 @@ async function init() {
     }
 
     const gameType = params.gameType || storedSession?.gameType || null;
+    gameSettings = storedSession?.settings || {};
 
     if (!gameCode) {
         forceRootPath('');
@@ -309,7 +311,7 @@ async function init() {
         responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio, container);
 
         // Create game instance
-        gameInstance = new GameClass(canvas, gameCode, isHost, playerNumber);
+        gameInstance = new GameClass(canvas, gameCode, isHost, playerNumber, gameSettings);
         gameInstance.onGameOver = (result) => showGameOver(
             result,
             playerNumber,

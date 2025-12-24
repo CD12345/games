@@ -26,7 +26,7 @@ function normalizeName(value) {
 }
 
 export class PongGame extends GameEngine {
-    constructor(canvas, gameCode, isHost, playerNumber) {
+    constructor(canvas, gameCode, isHost, playerNumber, settings = {}) {
         super(canvas);
 
         this.gameCode = gameCode;
@@ -34,6 +34,7 @@ export class PongGame extends GameEngine {
         this.playerNumber = playerNumber; // 1 or 2
         this.playerId = playerNumber === 1 ? 'p1' : 'p2';
         this.opponentId = playerNumber === 1 ? 'p2' : 'p1';
+        this.settings = settings;
 
         // Game state
         this.state = getInitialState();
@@ -42,7 +43,8 @@ export class PongGame extends GameEngine {
         // Components
         this.input = new InputManager(canvas);
         this.network = new NetworkSync(gameCode, isHost);
-        this.proximity = new ProximitySync(isHost);
+        this.proximityEnabled = settings.proximityEnabled !== false; // Default true
+        this.proximity = this.proximityEnabled ? new ProximitySync(isHost) : null;
         this.renderer = new PongRenderer(canvas);
 
         // Timing
@@ -101,20 +103,25 @@ export class PongGame extends GameEngine {
 
         sendMessage('player_name', { playerId: this.playerId, name: this.localName });
 
-        this.proximity.onDistanceChange = (distance) => {
-            this.debugDistanceFeet = distance;
-            this.state.paddleWidth = this.calculatePaddleWidth(distance);
-        };
+        if (this.proximity) {
+            this.proximity.onDistanceChange = (distance) => {
+                this.debugDistanceFeet = distance;
+                this.state.paddleWidth = this.calculatePaddleWidth(distance);
+            };
 
-        const proximityPromise = this.proximity.start().catch((error) => {
-            debugLog(`Proximity error: ${error?.message || error}`);
-            return false;
-        });
+            const proximityPromise = this.proximity.start().catch((error) => {
+                debugLog(`Proximity error: ${error?.message || error}`);
+                return false;
+            });
 
-        proximityPromise.then((available) => {
-            this.proximityAvailable = available;
-            debugLog(`Proximity: ${available ? 'available' : 'unavailable'}`);
-        });
+            proximityPromise.then((available) => {
+                this.proximityAvailable = available;
+                debugLog(`Proximity: ${available ? 'available' : 'unavailable'}`);
+            });
+        } else {
+            this.proximityAvailable = false;
+            debugLog('Proximity disabled by settings');
+        }
 
         // If host, initialize the game state
         if (this.isHost) {
@@ -458,7 +465,9 @@ export class PongGame extends GameEngine {
         super.destroy();
         this.input.destroy();
         this.network.stop();
-        this.proximity.stop();
+        if (this.proximity) {
+            this.proximity.stop();
+        }
 
         if (this.isHost) {
             offMessage('rematch_request');

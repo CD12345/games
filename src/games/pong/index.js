@@ -11,5 +11,13 @@ GameRegistry.register('pong', {
     maxPlayers: 2,
     icon: '🏓',
     gameClass: PongGame,
-    getInitialState
+    getInitialState,
+    settings: [
+        {
+            id: 'proximityEnabled',
+            label: 'Proximity Mode',
+            type: 'checkbox',
+            default: true
+        }
+    ]
 });

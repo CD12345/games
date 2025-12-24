@@ -356,6 +356,139 @@ h2 {
     color: var(--text-secondary);
 }
 
+/* Game Settings */
+.game-settings {
+    width: 100%;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+}
+
+.game-settings h3 {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.setting-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setting-item:last-child {
+    border-bottom: none;
+}
+
+.setting-label {
+    color: var(--text-primary);
+    font-size: 0.95rem;
+}
+
+.setting-control {
+    display: flex;
+    align-items: center;
+}
+
+/* Checkbox toggle switch */
+.setting-checkbox {
+    position: relative;
+    width: 48px;
+    height: 26px;
+}
+
+.setting-checkbox input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.setting-checkbox .toggle {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-card);
+    border-radius: 26px;
+    transition: 0.3s;
+}
+
+.setting-checkbox .toggle::before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+
+.setting-checkbox input:checked + .toggle {
+    background-color: var(--accent);
+}
+
+.setting-checkbox input:checked + .toggle::before {
+    transform: translateX(22px);
+}
+
+.setting-checkbox input:disabled + .toggle {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* String input */
+.setting-string {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--bg-card);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    width: 120px;
+    text-align: right;
+}
+
+.setting-string:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.setting-string:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Dropdown select */
+.setting-enum {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--bg-card);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    min-width: 100px;
+    cursor: pointer;
+}
+
+.setting-enum:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.setting-enum:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Responsive adjustments */
 @media (max-height: 600px) {
     #app {

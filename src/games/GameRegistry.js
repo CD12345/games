@@ -1,9 +1,16 @@
 // Game Registry - Plugin system for registering available games
+//
+// Settings types:
+//   checkbox: { type: 'checkbox', default: true/false }
+//   string:   { type: 'string', default: 'value' }
+//   enum:     { type: 'enum', options: ['opt1', 'opt2'], default: 'opt1' }
 
 const games = new Map();
 
 export const GameRegistry = {
     // Register a new game
+    // config.settings is optional array of setting definitions:
+    // [{ id: 'settingId', label: 'Display Name', type: 'checkbox'|'string'|'enum', default: value, options?: [] }]
     register(id, config) {
         if (games.has(id)) {
             console.warn(`Game '${id}' is already registered, overwriting.`);
@@ -17,7 +24,8 @@ export const GameRegistry = {
             icon: config.icon || '🎮',
             gameClass: config.gameClass,
             getInitialState: config.getInitialState,
-            debugOnly: config.debugOnly || false
+            debugOnly: config.debugOnly || false,
+            settings: config.settings || []
         });
     },
 
@@ -37,8 +45,21 @@ export const GameRegistry = {
                 description: game.description,
                 minPlayers: game.minPlayers,
                 maxPlayers: game.maxPlayers,
-                icon: game.icon
+                icon: game.icon,
+                settings: game.settings
             }));
+    },
+
+    // Get default settings values for a game
+    getDefaultSettings(id) {
+        const game = games.get(id);
+        if (!game || !game.settings) return {};
+
+        const defaults = {};
+        game.settings.forEach(setting => {
+            defaults[setting.id] = setting.default;
+        });
+        return defaults;
     },
 
     // Get game class for instantiation
