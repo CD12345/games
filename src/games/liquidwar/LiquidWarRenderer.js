@@ -67,10 +67,29 @@ export class LiquidWarRenderer {
         } : { r: 0, g: 0, b: 0 };
     }
 
+    // Fallback wall rendering when cache isn't available
+    renderWallsDirect(ctx, walls, gridWidth, gridHeight) {
+        const wallColor = LIQUID_WAR_CONFIG.colors.wall;
+        const floorColor = LIQUID_WAR_CONFIG.colors.floor;
+
+        for (let y = 0; y < gridHeight; y++) {
+            for (let x = 0; x < gridWidth; x++) {
+                const isWall = walls[y]?.[x] === 1;
+                ctx.fillStyle = isWall ? wallColor : floorColor;
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
     render(state, particleGrid, walls, gridWidth, gridHeight, playerNumber) {
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
+
+        // Safety check for canvas size
+        if (width <= 0 || height <= 0) {
+            return;
+        }
 
         // Clear canvas
         ctx.fillStyle = LIQUID_WAR_CONFIG.colors.floor;
@@ -78,6 +97,9 @@ export class LiquidWarRenderer {
 
         // Calculate scaling to fit grid in canvas
         const scale = Math.min(width / gridWidth, height / gridHeight);
+        if (scale <= 0 || !isFinite(scale)) {
+            return;
+        }
         const offsetX = (width - gridWidth * scale) / 2;
         const offsetY = (height - gridHeight * scale) / 2;
 
@@ -86,10 +108,13 @@ export class LiquidWarRenderer {
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
 
-        // Draw walls (from cache)
+        // Draw walls (from cache) or fallback to direct rendering
         if (this.wallCanvas) {
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(this.wallCanvas, 0, 0);
+        } else if (walls) {
+            // Fallback: render walls directly if cache not available
+            this.renderWallsDirect(ctx, walls, gridWidth, gridHeight);
         }
 
         // Draw particles
@@ -98,7 +123,9 @@ export class LiquidWarRenderer {
         }
 
         // Draw cursors
-        this.renderCursors(ctx, state.cursors, gridWidth, gridHeight, playerNumber);
+        if (state.cursors) {
+            this.renderCursors(ctx, state.cursors, gridWidth, gridHeight, playerNumber);
+        }
 
         ctx.restore();
 
@@ -107,37 +134,48 @@ export class LiquidWarRenderer {
     }
 
     renderParticles(ctx, particleGrid, gridWidth, gridHeight) {
-        // Draw particles directly using ImageData for performance
-        if (!this.particleCanvas) return;
-
-        const imageData = this.particleCtx.createImageData(gridWidth, gridHeight);
-        const data = imageData.data;
-
         const colors = LIQUID_WAR_CONFIG.colors.teams;
-        const p1Color = this.hexToRgb(colors[0]);
-        const p2Color = this.hexToRgb(colors[1]);
-        const floorColor = this.hexToRgb(LIQUID_WAR_CONFIG.colors.floor);
 
-        for (let y = 0; y < gridHeight; y++) {
-            for (let x = 0; x < gridWidth; x++) {
-                const i = (y * gridWidth + x) * 4;
-                const particle = particleGrid[y]?.[x];
+        // Try fast ImageData path first
+        if (this.particleCanvas && this.particleCtx) {
+            const imageData = this.particleCtx.createImageData(gridWidth, gridHeight);
+            const data = imageData.data;
 
-                if (particle) {
-                    const color = particle.team === 'p1' ? p1Color : p2Color;
-                    data[i] = color.r;
-                    data[i + 1] = color.g;
-                    data[i + 2] = color.b;
-                    data[i + 3] = 255;
-                } else {
-                    // Transparent for non-particles
-                    data[i + 3] = 0;
+            const p1Color = this.hexToRgb(colors[0]);
+            const p2Color = this.hexToRgb(colors[1]);
+
+            for (let y = 0; y < gridHeight; y++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const i = (y * gridWidth + x) * 4;
+                    const particle = particleGrid[y]?.[x];
+
+                    if (particle) {
+                        const color = particle.team === 'p1' ? p1Color : p2Color;
+                        data[i] = color.r;
+                        data[i + 1] = color.g;
+                        data[i + 2] = color.b;
+                        data[i + 3] = 255;
+                    } else {
+                        // Transparent for non-particles
+                        data[i + 3] = 0;
+                    }
+                }
+            }
+
+            this.particleCtx.putImageData(imageData, 0, 0);
+            ctx.drawImage(this.particleCanvas, 0, 0);
+        } else {
+            // Fallback: render particles directly (slower but works without offscreen canvas)
+            for (let y = 0; y < gridHeight; y++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    const particle = particleGrid[y]?.[x];
+                    if (particle) {
+                        ctx.fillStyle = particle.team === 'p1' ? colors[0] : colors[1];
+                        ctx.fillRect(x, y, 1, 1);
+                    }
                 }
             }
         }
-
-        this.particleCtx.putImageData(imageData, 0, 0);
-        ctx.drawImage(this.particleCanvas, 0, 0);
     }
 
     renderCursors(ctx, cursors, gridWidth, gridHeight, playerNumber) {

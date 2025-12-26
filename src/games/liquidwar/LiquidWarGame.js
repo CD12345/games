@@ -444,6 +444,7 @@ export class LiquidWarGame extends GameEngine {
             if (elapsed >= LIQUID_WAR_CONFIG.game.countdownTime) {
                 this.state.phase = 'playing';
                 this.state.startTime = Date.now();
+                debugLog('Phase changed to playing');
             }
             return;
         }
@@ -751,6 +752,10 @@ export class LiquidWarGame extends GameEngine {
 
     // Decompress particle grid from network data
     decompressParticleGrid(compressed) {
+        if (!compressed || compressed.length === 0) {
+            return;
+        }
+
         if (!this.particleGrid) {
             this.particleGrid = [];
             for (let y = 0; y < this.gridHeight; y++) {
@@ -770,6 +775,11 @@ export class LiquidWarGame extends GameEngine {
             const value = compressed[i + 1];
 
             for (let j = 0; j < count; j++) {
+                // Bounds check
+                if (y >= this.gridHeight) {
+                    return;
+                }
+
                 if (value === -1) {
                     this.particleGrid[y][x] = null;
                 } else {
