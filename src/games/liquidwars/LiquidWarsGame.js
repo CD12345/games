@@ -23,7 +23,7 @@ function indexFor(x, y, width) {
     return y * width + x;
 }
 
-function getInitialState(config) {
+export function getInitialState(config = DEFAULT_CONFIG) {
     const { gridWidth, gridHeight } = config;
     const totalCells = gridWidth * gridHeight;
     const densities = {
@@ -210,7 +210,21 @@ export class LiquidWarsGame extends GameEngine {
         this.opponentId = playerNumber === 1 ? 'p2' : 'p1';
         this.settings = settings;
 
-        this.config = { ...DEFAULT_CONFIG, ...settings };
+        const normalizedSettings = { ...settings };
+        if (normalizedSettings.gridWidth !== undefined) {
+            const width = Number(normalizedSettings.gridWidth);
+            normalizedSettings.gridWidth = Number.isFinite(width) ? width : DEFAULT_CONFIG.gridWidth;
+        }
+        if (normalizedSettings.gridHeight !== undefined) {
+            const height = Number(normalizedSettings.gridHeight);
+            normalizedSettings.gridHeight = Number.isFinite(height) ? height : DEFAULT_CONFIG.gridHeight;
+        }
+        if (normalizedSettings.spawnRate !== undefined) {
+            const spawnRate = Number(normalizedSettings.spawnRate);
+            normalizedSettings.spawnRate = Number.isFinite(spawnRate) ? spawnRate : DEFAULT_CONFIG.spawnRate;
+        }
+
+        this.config = { ...DEFAULT_CONFIG, ...normalizedSettings };
         this.state = getInitialState(this.config);
         this.renderer = new LiquidWarsRenderer(canvas);
 

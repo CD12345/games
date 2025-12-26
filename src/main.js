@@ -23,6 +23,7 @@ import { getBasePath, storeEntryPath } from './ui/url.js';
 // Import and register games
 import './games/pong/index.js';
 import './games/debug/index.js';
+import './games/liquidwars/index.js';
 
 // DOM Elements
 const screens = {

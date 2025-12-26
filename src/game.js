@@ -18,6 +18,7 @@ import { getBasePath, getEntryPath } from './ui/url.js';
 // Import games
 import './games/pong/index.js';
 import './games/debug/index.js';
+import './games/liquidwars/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
