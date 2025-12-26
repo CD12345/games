@@ -33,8 +33,9 @@ class ChirpDetectorProcessor extends AudioWorkletProcessor {
         // Detection state
         this.lastPeakFrame = 0;
         this.minPeakInterval = Math.floor(this.sampleRate * 0.08); // 80ms between detections
-        this.snrThresholdDb = 3; // Detect when 3dB above noise
-        this.snrThresholdLinear = Math.pow(10, this.snrThresholdDb / 20); // ~1.41
+        this.snrThresholdDb = 12; // Detect when 12dB above noise (was 3dB - too sensitive)
+        this.snrThresholdLinear = Math.pow(10, this.snrThresholdDb / 20); // ~4.0
+        this.minCorrelation = 0.15; // Minimum absolute correlation to detect (real chirps are 0.5+)
 
         // Periods to exclude from noise estimation (during known transmissions)
         this.excludeUntilFrame = 0;
@@ -182,11 +183,13 @@ class ChirpDetectorProcessor extends AudioWorkletProcessor {
             this.noiseFloor = this.noiseFloor * (1 - this.noiseUpdateAlpha) + correlation * this.noiseUpdateAlpha;
         }
 
-        // Detection: correlation > noise floor * threshold, and not in cooldown
+        // Detection: correlation > noise floor * threshold, above minimum, and not in cooldown
         const threshold = this.noiseFloor * this.snrThresholdLinear;
         const timeSinceLastPeak = peakFrame - this.lastPeakFrame;
 
-        if (!isExcluded && correlation > threshold && timeSinceLastPeak > this.minPeakInterval) {
+        // Require both SNR threshold AND minimum absolute correlation
+        // This prevents detecting noise even when noise floor is very low
+        if (!isExcluded && correlation > threshold && correlation >= this.minCorrelation && timeSinceLastPeak > this.minPeakInterval) {
             this.lastPeakFrame = peakFrame;
 
             // Send detection to main thread
