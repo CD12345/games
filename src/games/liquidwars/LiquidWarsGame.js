@@ -159,12 +159,15 @@ function computeDistanceField(grid, cursor) {
 }
 
 function applyFlow(densities, distances, grid, flowFraction) {
-    const { width, height } = grid;
+    const { width, height, walkable } = grid;
     const next = densities.slice();
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const index = indexFor(x, y, width);
+            if (walkable && walkable[index] === false) {
+                continue;
+            }
             const density = densities[index];
             if (density <= 0) {
                 continue;
@@ -185,6 +188,9 @@ function applyFlow(densities, distances, grid, flowFraction) {
                     continue;
                 }
                 const neighborIndex = indexFor(neighbor.x, neighbor.y, width);
+                if (walkable && walkable[neighborIndex] === false) {
+                    continue;
+                }
                 const neighborDistance = distances[neighborIndex];
                 if (neighborDistance < bestDistance) {
                     bestDistance = neighborDistance;
