@@ -92,9 +92,43 @@ export class ProximityDetector {
 
     async start() {
         try {
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: SAMPLE_RATE
-            });
+            // Try to select speakerphone output for mobile devices
+            let sinkId = undefined;
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const outputs = devices.filter(d => d.kind === 'audiooutput');
+                debugLog(`Audio outputs: ${outputs.map(d => d.label || d.deviceId).join(', ')}`);
+
+                // Look for speakerphone/speaker (not earpiece)
+                const speakerphone = outputs.find(d =>
+                    d.label.toLowerCase().includes('speaker') &&
+                    !d.label.toLowerCase().includes('earpiece')
+                );
+                if (speakerphone) {
+                    sinkId = speakerphone.deviceId;
+                    debugLog(`Selected output: ${speakerphone.label}`);
+                }
+            } catch (e) {
+                debugLog(`Could not enumerate audio devices: ${e.message}`);
+            }
+
+            // Create AudioContext with speakerphone if available
+            const contextOptions = { sampleRate: SAMPLE_RATE };
+            if (sinkId && 'setSinkId' in AudioContext.prototype) {
+                contextOptions.sinkId = sinkId;
+            }
+
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)(contextOptions);
+
+            // Try setSinkId after creation (fallback for browsers that don't support it in constructor)
+            if (sinkId && this.audioContext.setSinkId) {
+                try {
+                    await this.audioContext.setSinkId(sinkId);
+                    debugLog(`Set audio sink to: ${sinkId}`);
+                } catch (e) {
+                    debugLog(`Could not set audio sink: ${e.message}`);
+                }
+            }
 
             // Measure output latency
             this.outputLatencyMs = ((this.audioContext.outputLatency || 0) +
@@ -262,10 +296,11 @@ export class ProximityDetector {
         oscillator.frequency.setValueAtTime(CHIRP_FREQ_START, startTime);
         oscillator.frequency.linearRampToValueAtTime(CHIRP_FREQ_END, startTime + CHIRP_DURATION);
 
-        // Smooth envelope
+        // Smooth envelope - use high volume (0.8) for audibility through speakerphone
+        const volume = 0.8;
         gainNode.gain.setValueAtTime(0, startTime);
-        gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.003);
-        gainNode.gain.setValueAtTime(0.3, startTime + CHIRP_DURATION - 0.003);
+        gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.003);
+        gainNode.gain.setValueAtTime(volume, startTime + CHIRP_DURATION - 0.003);
         gainNode.gain.linearRampToValueAtTime(0, startTime + CHIRP_DURATION);
 
         oscillator.connect(gainNode);
