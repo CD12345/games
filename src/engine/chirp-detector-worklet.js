@@ -35,7 +35,11 @@ class ChirpDetectorProcessor extends AudioWorkletProcessor {
         this.minPeakInterval = Math.floor(this.sampleRate * 0.08); // 80ms between detections
         this.snrThresholdDb = 12; // Detect when 12dB above noise (was 3dB - too sensitive)
         this.snrThresholdLinear = Math.pow(10, this.snrThresholdDb / 20); // ~4.0
-        this.minCorrelation = 0.15; // Minimum absolute correlation to detect (real chirps are 0.5+)
+        // Minimum correlation - balance between rejecting echoes and detecting weak signals
+        // Real chirps: 0.3-0.9 depending on conditions
+        // Echoes: 0.3-0.6 (overlaps with weak real chirps)
+        // Using 0.25 as compromise - timing window in main code handles false positives
+        this.minCorrelation = 0.25;
 
         // Periods to exclude from noise estimation (during known transmissions)
         this.excludeUntilFrame = 0;
