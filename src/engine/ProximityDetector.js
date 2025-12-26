@@ -22,13 +22,12 @@ const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
 
 // Protocol timing
 const RESPONSE_DELAY_MS = 50;       // Wait before responding to ensure chirp ended
-const DEAF_PERIOD_MS = 30;          // Block self-echo (30ms chirp detected ~immediately, this blocks echo)
+const DEAF_PERIOD_MS = 30;          // Block immediate self-echo only
 
 // Timing window for DS-TWR responses (reject detections outside this window)
-// Expected timing: sound travel (5-10ms) + processing (50ms) + sound back (5-10ms) ≈ 60-120ms
-// Add large margin for audio stack latency which can be 50-200ms on some devices
+// With high audio latency on both devices, responses can take 500ms+
 const MIN_RESPONSE_TIME_MS = 30;    // Minimum time for a real response (reject echoes)
-const MAX_RESPONSE_TIME_MS = 500;   // Maximum time for a real response (allow for slow audio stacks)
+const MAX_RESPONSE_TIME_MS = 900;   // Allow up to 900ms for slow audio stacks + network
 
 // Distance smoothing
 const SMOOTHING_FACTOR = 0.3;
@@ -450,19 +449,11 @@ export class ProximityDetector {
         this.T_rx2_remote = remoteData.T_rx2;
         const remoteLatency = remoteData.latency || 0;
 
-        // Raw measured values
-        const Tround1_raw = this.T_rx1 - this.T_tx1;
-        const Treply1_raw = this.T_tx1_remote - this.T_rx1_remote;
-        const Tround2_raw = this.T_rx2_remote - this.T_tx1_remote;
-        const Treply2_raw = this.T_tx2 - this.T_rx1;
-
-        // Apply latency corrections:
-        // - Round trips appear longer by device latency (subtract to correct)
-        // - Reply times appear shorter by device latency (add to correct)
-        const Tround1 = Tround1_raw - this.selfLatencyMs;
-        const Treply1 = Treply1_raw + remoteLatency;
-        const Tround2 = Tround2_raw - remoteLatency;
-        const Treply2 = Treply2_raw + this.selfLatencyMs;
+        // Use raw measured values directly - latency corrections were making things worse
+        const Tround1 = this.T_rx1 - this.T_tx1;
+        const Treply1 = this.T_tx1_remote - this.T_rx1_remote;
+        const Tround2 = this.T_rx2_remote - this.T_tx1_remote;
+        const Treply2 = this.T_tx2 - this.T_rx1;
 
         const numerator = (Tround1 * Tround2) - (Treply1 * Treply2);
         const denominator = Tround1 + Tround2 + Treply1 + Treply2;
@@ -476,8 +467,6 @@ export class ProximityDetector {
         const tofMs = numerator / denominator;
         const distanceFeet = (tofMs / 1000) * SPEED_OF_SOUND_FPS;
 
-        debugLog(`DS-TWR: Raw Tr1=${Tround1_raw.toFixed(1)} Tp1=${Treply1_raw.toFixed(1)} Tr2=${Tround2_raw.toFixed(1)} Tp2=${Treply2_raw.toFixed(1)}`);
-        debugLog(`DS-TWR: Corrected (selfL=${this.selfLatencyMs.toFixed(1)}, remoteL=${remoteLatency.toFixed(1)})`);
         debugLog(`DS-TWR: Tr1=${Tround1.toFixed(1)} Tp1=${Treply1.toFixed(1)} Tr2=${Tround2.toFixed(1)} Tp2=${Treply2.toFixed(1)}`);
         debugLog(`DS-TWR: ToF=${tofMs.toFixed(2)}ms -> ${distanceFeet.toFixed(1)}ft`);
 
