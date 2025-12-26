@@ -24,6 +24,12 @@ const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
 const RESPONSE_DELAY_MS = 50;       // Wait before responding to ensure chirp ended
 const DEAF_PERIOD_MS = 30;          // Block self-echo (30ms chirp detected ~immediately, this blocks echo)
 
+// Timing window for DS-TWR responses (reject detections outside this window)
+// Expected timing: sound travel (5-10ms) + processing (50ms) + sound back (5-10ms) ≈ 60-120ms
+// Add margin for variable latency
+const MIN_RESPONSE_TIME_MS = 40;    // Minimum time for a real response (reject echoes)
+const MAX_RESPONSE_TIME_MS = 250;   // Maximum time for a real response (reject late noise)
+
 // Distance smoothing
 const SMOOTHING_FACTOR = 0.3;
 
@@ -472,9 +478,20 @@ export class ProximityDetector {
     handleInitiatorChirp2(rxTime) {
         if (this.rangingState !== 'wait_rx2') return null;
 
+        // Check timing window - reject chirp 2 if it arrives too early or too late
+        const responseTime = rxTime - this.T_tx1_remote;
+        if (responseTime < MIN_RESPONSE_TIME_MS) {
+            debugLog(`DS-TWR Responder: Rejecting chirp 2 (too fast: ${responseTime.toFixed(0)}ms, likely echo)`);
+            return null;
+        }
+        if (responseTime > MAX_RESPONSE_TIME_MS) {
+            debugLog(`DS-TWR Responder: Rejecting chirp 2 (too slow: ${responseTime.toFixed(0)}ms, likely noise)`);
+            return null;
+        }
+
         this.T_rx2_remote = rxTime;
 
-        debugLog(`DS-TWR Responder: Rx2=${rxTime.toFixed(0)}, sending timing data`);
+        debugLog(`DS-TWR Responder: Rx2=${rxTime.toFixed(0)} (${responseTime.toFixed(0)}ms after Tx1), sending timing data`);
 
         const timingData = {
             T_rx1: this.T_rx1_remote,
@@ -498,10 +515,21 @@ export class ProximityDetector {
 
         if (this.isInitiator) {
             if (this.rangingState === 'wait_rx1') {
+                // Check timing window - reject responses that are too fast (echo) or too slow (noise)
+                const responseTime = rxTime - this.T_tx1;
+                if (responseTime < MIN_RESPONSE_TIME_MS) {
+                    debugLog(`DS-TWR: Rejecting detection (too fast: ${responseTime.toFixed(0)}ms < ${MIN_RESPONSE_TIME_MS}ms, likely echo)`);
+                    return;
+                }
+                if (responseTime > MAX_RESPONSE_TIME_MS) {
+                    debugLog(`DS-TWR: Rejecting detection (too slow: ${responseTime.toFixed(0)}ms > ${MAX_RESPONSE_TIME_MS}ms, likely noise)`);
+                    return;
+                }
+
                 this.T_rx1 = rxTime;
                 this.rangingState = 'sending_chirp2';
 
-                debugLog(`DS-TWR Initiator: Rx1=${rxTime.toFixed(0)}, sending chirp 2 in ${RESPONSE_DELAY_MS}ms`);
+                debugLog(`DS-TWR Initiator: Rx1=${rxTime.toFixed(0)} (${responseTime.toFixed(0)}ms after Tx1), sending chirp 2 in ${RESPONSE_DELAY_MS}ms`);
 
                 setTimeout(() => {
                     if (this.rangingState !== 'sending_chirp2') return;
