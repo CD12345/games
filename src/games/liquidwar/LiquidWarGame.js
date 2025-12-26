@@ -563,38 +563,28 @@ export class LiquidWarGame extends GameEngine {
         const deadParticles = [];
 
         for (const particle of this.particles) {
-            const myGrad = this.gradients[particle.team];
-            if (!myGrad) continue;
-
-            const myCurrentGrad = myGrad[particle.y]?.[particle.x];
-            if (myCurrentGrad === undefined || myCurrentGrad === Infinity) continue;
-
-            // Find my preferred direction (lowest gradient = toward my cursor)
-            let bestDir = null;
-            let bestGrad = myCurrentGrad;
-
+            // Check all neighbors for enemies
             for (const dir of DIRECTIONS) {
                 const nx = particle.x + dir.dx;
                 const ny = particle.y + dir.dy;
 
-                if (!this.isWalkable(nx, ny)) continue;
+                const neighbor = this.getParticleAt(nx, ny);
+                if (neighbor && neighbor.team !== particle.team) {
+                    const myGrad = this.gradients[particle.team];
+                    const theirGrad = this.gradients[neighbor.team];
 
-                const targetGrad = myGrad[ny]?.[nx];
-                if (targetGrad !== undefined && targetGrad < bestGrad) {
-                    bestGrad = targetGrad;
-                    bestDir = dir;
-                }
-            }
+                    if (!myGrad || !theirGrad) continue;
 
-            // Attack enemy in preferred direction (if any)
-            if (bestDir) {
-                const targetX = particle.x + bestDir.dx;
-                const targetY = particle.y + bestDir.dy;
-                const target = this.getParticleAt(targetX, targetY);
+                    const myDist = myGrad[particle.y]?.[particle.x];
+                    const theirDist = theirGrad[neighbor.y]?.[neighbor.x];
 
-                if (target && target.team !== particle.team) {
-                    // I want to move into this enemy's cell = I'm attacking them
-                    target.health -= config.attackDamage;
+                    if (myDist === undefined || theirDist === undefined) continue;
+
+                    // Particle FAR from its cursor is "pushing" harder
+                    // The one with higher distance to their own cursor is attacking
+                    if (myDist >= theirDist) {
+                        neighbor.health -= config.attackDamage;
+                    }
                 }
             }
 
