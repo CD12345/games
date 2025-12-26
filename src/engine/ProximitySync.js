@@ -35,9 +35,15 @@ export class ProximitySync {
             }
         };
 
-        // Wait for calibration before starting ranging (host only)
-        this.detector.onCalibrated = (noiseFloor) => {
-            debugLog(`ProximitySync: Calibration complete, noise floor = ${noiseFloor.toFixed(4)}`);
+        // Wait for noise floor calibration, then run loopback calibration
+        this.detector.onCalibrated = async (noiseFloor) => {
+            debugLog(`ProximitySync: Noise floor calibration complete = ${noiseFloor.toFixed(4)}`);
+
+            // Run loopback calibration to measure device latency
+            debugLog('ProximitySync: Starting loopback calibration...');
+            await this.detector.runLoopbackCalibration(5);
+
+            // Now start ranging (host only)
             if (this.isHost && this.isRunning && !this.rangingInterval) {
                 this.startRanging();
             }
@@ -71,7 +77,8 @@ export class ProximitySync {
         this.isRunning = true;
 
         // Host: Start ranging after calibration (or immediately if already calibrated/fallback)
-        if (this.isHost && available && this.detector.getIsCalibrated()) {
+        // Note: loopback calibration is triggered by onCalibrated callback
+        if (this.isHost && available && this.detector.getIsCalibrated() && this.detector.getSelfLatency() > 0) {
             this.startRanging();
         }
 
