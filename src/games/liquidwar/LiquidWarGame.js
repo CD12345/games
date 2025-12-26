@@ -401,21 +401,36 @@ export class LiquidWarGame extends GameEngine {
         const touchPos = this.input.getTouchPosition();
 
         if (touchPos) {
-            // Touch/click: move cursor toward touch position
-            const targetX = touchPos.x;
-            const targetY = touchPos.y;
+            // Smooth the touch position to reduce jerkiness
+            if (!this.smoothedTouch) {
+                this.smoothedTouch = { x: touchPos.x, y: touchPos.y };
+            } else {
+                // Exponential smoothing - faster response but still smooth
+                const smoothing = 0.3;
+                this.smoothedTouch.x += (touchPos.x - this.smoothedTouch.x) * smoothing;
+                this.smoothedTouch.y += (touchPos.y - this.smoothedTouch.y) * smoothing;
+            }
+
+            // Move cursor toward smoothed touch position
+            const targetX = this.smoothedTouch.x;
+            const targetY = this.smoothedTouch.y;
 
             const dx = targetX - cursor.x;
             const dy = targetY - cursor.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (dist > 0.01) {
-                const moveX = (dx / dist) * speed;
-                const moveY = (dy / dist) * speed;
+            if (dist > 0.005) {
+                // Use proportional speed - faster when far, slower when close
+                const moveSpeed = Math.min(speed * 3, dist * 0.15);
+                const moveX = (dx / dist) * moveSpeed;
+                const moveY = (dy / dist) * moveSpeed;
                 cursor.x = Math.max(0, Math.min(1, cursor.x + moveX));
                 cursor.y = Math.max(0, Math.min(1, cursor.y + moveY));
             }
         } else {
+            // Clear smoothed touch when not touching
+            this.smoothedTouch = null;
+
             // Keyboard input
             const keys = this.input.getKeys();
             if (keys.up) cursor.y = Math.max(0, cursor.y - speed);
@@ -548,26 +563,38 @@ export class LiquidWarGame extends GameEngine {
         const deadParticles = [];
 
         for (const particle of this.particles) {
-            // Check all neighbors for enemies
+            const myGrad = this.gradients[particle.team];
+            if (!myGrad) continue;
+
+            const myCurrentGrad = myGrad[particle.y]?.[particle.x];
+            if (myCurrentGrad === undefined || myCurrentGrad === Infinity) continue;
+
+            // Find my preferred direction (lowest gradient = toward my cursor)
+            let bestDir = null;
+            let bestGrad = myCurrentGrad;
+
             for (const dir of DIRECTIONS) {
                 const nx = particle.x + dir.dx;
                 const ny = particle.y + dir.dy;
 
-                const neighbor = this.getParticleAt(nx, ny);
-                if (neighbor && neighbor.team !== particle.team) {
-                    // Attack! (mutual damage)
-                    // Damage is dealt based on who is "pushing" toward the other
-                    const myGrad = this.gradients[particle.team];
-                    const theirGrad = this.gradients[neighbor.team];
+                if (!this.isWalkable(nx, ny)) continue;
 
-                    const myDist = myGrad[particle.y][particle.x];
-                    const theirDist = theirGrad[neighbor.y][neighbor.x];
+                const targetGrad = myGrad[ny]?.[nx];
+                if (targetGrad !== undefined && targetGrad < bestGrad) {
+                    bestGrad = targetGrad;
+                    bestDir = dir;
+                }
+            }
 
-                    // Particle closer to its goal attacks harder
-                    // The one "pushing" deals more damage
-                    if (myDist <= theirDist) {
-                        neighbor.health -= config.attackDamage;
-                    }
+            // Attack enemy in preferred direction (if any)
+            if (bestDir) {
+                const targetX = particle.x + bestDir.dx;
+                const targetY = particle.y + bestDir.dy;
+                const target = this.getParticleAt(targetX, targetY);
+
+                if (target && target.team !== particle.team) {
+                    // I want to move into this enemy's cell = I'm attacking them
+                    target.health -= config.attackDamage;
                 }
             }
 
