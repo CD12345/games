@@ -554,6 +554,13 @@ export class ProximityDetector {
             return false;
         }
 
+        // Ensure AudioContext is running
+        if (this.audioContext.state === 'suspended') {
+            debugLog('Loopback: Resuming AudioContext...');
+            await this.audioContext.resume();
+            await new Promise(r => setTimeout(r, 100));
+        }
+
         debugLog(`Loopback: Starting calibration (${numSamples} samples)...`);
         this.calibrationSamples = [];
         this.isCalibrating = true;
@@ -574,8 +581,10 @@ export class ProximityDetector {
             debugLog(`Loopback: Calibration complete, latency = ${this.selfLatencyMs.toFixed(1)}ms`);
             return true;
         } else {
-            debugLog('Loopback: Calibration failed (not enough samples)');
-            this.selfLatencyMs = 0;
+            debugLog(`Loopback: Calibration failed (only ${this.calibrationSamples.length} samples)`);
+            // Use a default estimate based on typical audio latency
+            this.selfLatencyMs = 50;  // Conservative default
+            debugLog('Loopback: Using default latency estimate of 50ms');
             return false;
         }
     }
@@ -584,26 +593,39 @@ export class ProximityDetector {
         return new Promise((resolve) => {
             // Temporarily capture chirp detection for calibration
             const originalHandler = this.onChirpDetected;
+            const emitTime = performance.now();
+
             const timeout = setTimeout(() => {
                 this.onChirpDetected = originalHandler;
-                debugLog('Loopback: Sample timeout');
+                debugLog('Loopback: Sample timeout (no self-detection)');
                 resolve();
-            }, 200);
+            }, 250);
 
             this.onChirpDetected = (rxTime, correlation) => {
-                clearTimeout(timeout);
-                this.onChirpDetected = originalHandler;
-
                 const latency = rxTime - this.calibrationTxTime;
-                if (latency > 0 && latency < 150) {  // Sanity check
+
+                // Loopback should be fast (same device): 10-100ms typical
+                // Reject if too fast (< 5ms, likely a bug) or too slow (> 120ms, probably other device)
+                if (latency >= 5 && latency <= 120) {
+                    clearTimeout(timeout);
+                    this.onChirpDetected = originalHandler;
                     this.calibrationSamples.push(latency);
-                    debugLog(`Loopback: Sample ${this.calibrationSamples.length}, latency = ${latency.toFixed(1)}ms`);
+                    debugLog(`Loopback: Sample ${this.calibrationSamples.length}, latency = ${latency.toFixed(1)}ms, corr=${correlation.toFixed(2)}`);
+                    resolve();
+                } else {
+                    // Likely detection from other device or noise, ignore and wait for our own
+                    debugLog(`Loopback: Ignoring detection with latency ${latency.toFixed(1)}ms (expected 5-120ms)`);
                 }
-                resolve();
             };
 
             // Emit and record TX time
             this.calibrationTxTime = this.emitChirp();
+            if (this.calibrationTxTime === 0) {
+                debugLog('Loopback: Emit failed (AudioContext issue?)');
+                clearTimeout(timeout);
+                this.onChirpDetected = originalHandler;
+                resolve();
+            }
         });
     }
 }

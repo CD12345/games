@@ -50,9 +50,12 @@ export class ProximitySync {
         };
 
         // Guest: Handle chirp detection to respond in DS-TWR sequence
+        // Note: This handler is saved during loopback calibration and restored after
         if (!this.isHost) {
             this.detector.onChirpDetected = (rxTime, amplitude) => {
                 // Guest detected a chirp from host
+                debugLog(`Guest chirp handler: state=${this.detector.rangingState}, rx=${rxTime.toFixed(0)}ms`);
+
                 if (this.detector.rangingState === 'idle') {
                     // First chirp from initiator - start responding
                     this.detector.handleInitiatorChirp1(rxTime);
@@ -61,8 +64,10 @@ export class ProximitySync {
                     const timingData = this.detector.handleInitiatorChirp2(rxTime);
                     if (timingData) {
                         sendMessage('proximity_timing', timingData);
-                        debugLog('DS-TWR: Sent timing data to host');
+                        debugLog(`DS-TWR: Sent timing data to host (latency=${timingData.latency}ms)`);
                     }
+                } else {
+                    debugLog(`Guest: Unexpected chirp in state ${this.detector.rangingState}`);
                 }
             };
         }
