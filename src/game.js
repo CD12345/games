@@ -18,6 +18,7 @@ import { getBasePath, getEntryPath } from './ui/url.js';
 // Import games
 import './games/pong/index.js';
 import './games/debug/index.js';
+import './games/liquidwar/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -306,7 +307,13 @@ async function init() {
 
         // Set up responsive canvas
         const gameConfig = GameRegistry.getGame(gameType);
-        const aspectRatio = gameConfig?.id === 'pong' ? PONG_CONFIG.aspectRatio : 9 / 16;
+        // Liquid War uses 1:1 (square), Pong uses portrait, others default to portrait
+        let aspectRatio = 9 / 16;
+        if (gameConfig?.id === 'pong') {
+            aspectRatio = PONG_CONFIG.aspectRatio;
+        } else if (gameConfig?.id === 'liquidwar') {
+            aspectRatio = 1;  // Square
+        }
         const container = document.getElementById('game-container');
         responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio, container);
 
