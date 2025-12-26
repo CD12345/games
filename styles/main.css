@@ -65,6 +65,11 @@ body {
     padding-bottom: 1.5rem;
 }
 
+#lobby-screen {
+    overflow-y: auto;
+    padding-bottom: 1.5rem;
+}
+
 .hidden {
     display: none !important;
 }
@@ -402,6 +407,11 @@ h2 {
     padding: 1rem;
     background: var(--bg-secondary);
     border-radius: 12px;
+}
+
+#game-settings {
+    max-height: 45vh;
+    overflow-y: auto;
 }
 
 .game-settings h3 {
