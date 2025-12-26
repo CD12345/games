@@ -2,9 +2,9 @@
 
 import { GameRegistry } from '../GameRegistry.js';
 import { LiquidWarsGame, getInitialState } from './LiquidWarsGame.js';
-import { LIQUIDWARS_CONFIG } from './config.js';
+import { DEFAULT_LIQUIDWARS_MAP_ID, LIQUIDWARS_MAPS } from './maps.js';
 
-const MAP_OPTIONS = Object.keys(LIQUIDWARS_CONFIG.maps || { default: {} });
+const MAP_OPTIONS = Object.keys(LIQUIDWARS_MAPS);
 const GRID_WIDTH_OPTIONS = ['36', '42', '48'];
 const GRID_HEIGHT_OPTIONS = ['24', '28', '32'];
 const SPAWN_RATE_OPTIONS = ['3', '6', '9'];
@@ -23,7 +23,7 @@ GameRegistry.register('liquidwars', {
             label: 'Map',
             type: 'enum',
             options: MAP_OPTIONS,
-            default: MAP_OPTIONS[0] || 'default'
+            default: DEFAULT_LIQUIDWARS_MAP_ID
         },
         {
             id: 'gridWidth',

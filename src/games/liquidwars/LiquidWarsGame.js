@@ -4,6 +4,7 @@ import { GameEngine } from '../../engine/GameEngine.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
 import { LiquidWarsRenderer } from './LiquidWarsRenderer.js';
 import { deserializeSnapshot, serializeSnapshot } from './serialize.js';
+import { DEFAULT_LIQUIDWARS_MAP_ID, LIQUIDWARS_MAPS } from './maps.js';
 
 const DEFAULT_CONFIG = {
     gridWidth: 42,
@@ -12,7 +13,8 @@ const DEFAULT_CONFIG = {
     spawnRate: 6,
     baseDensity: 20,
     winDensityThreshold: 1,
-    maxDensityForColor: 30
+    maxDensityForColor: 30,
+    mapId: DEFAULT_LIQUIDWARS_MAP_ID
 };
 
 function clamp(value, min, max) {
@@ -23,25 +25,68 @@ function indexFor(x, y, width) {
     return y * width + x;
 }
 
-export function getInitialState(config = DEFAULT_CONFIG) {
-    const { gridWidth, gridHeight } = config;
+function parseMapLayout(layout) {
+    const height = layout.length;
+    const width = layout.reduce((max, row) => Math.max(max, row.length), 0);
+    const walkable = Array(width * height).fill(true);
+    const bases = [];
+
+    for (let y = 0; y < height; y++) {
+        const row = layout[y];
+        for (let x = 0; x < width; x++) {
+            const char = row[x] ?? '#';
+            const index = indexFor(x, y, width);
+            if (char === '#') {
+                walkable[index] = false;
+                continue;
+            }
+            if (char === '1') {
+                bases.push({ x, y, owner: 'p1' });
+            }
+            if (char === '2') {
+                bases.push({ x, y, owner: 'p2' });
+            }
+        }
+    }
+
+    return { width, height, walkable, bases };
+}
+
+export function getInitialState(settings = {}) {
+    const mapId = settings.mapId || DEFAULT_CONFIG.mapId;
+    const selectedMap = LIQUIDWARS_MAPS[mapId] ?? LIQUIDWARS_MAPS[DEFAULT_LIQUIDWARS_MAP_ID];
+    const mapLayout = selectedMap?.layout || [];
+    const { width, height, walkable, bases } = mapLayout.length
+        ? parseMapLayout(mapLayout)
+        : {
+            width: settings.gridWidth || DEFAULT_CONFIG.gridWidth,
+            height: settings.gridHeight || DEFAULT_CONFIG.gridHeight,
+            walkable: Array((settings.gridWidth || DEFAULT_CONFIG.gridWidth)
+                * (settings.gridHeight || DEFAULT_CONFIG.gridHeight)).fill(true),
+            bases: [
+                { x: 3, y: Math.floor((settings.gridHeight || DEFAULT_CONFIG.gridHeight) / 2), owner: 'p1' },
+                {
+                    x: (settings.gridWidth || DEFAULT_CONFIG.gridWidth) - 4,
+                    y: Math.floor((settings.gridHeight || DEFAULT_CONFIG.gridHeight) / 2),
+                    owner: 'p2'
+                }
+            ]
+        };
+    const gridWidth = width;
+    const gridHeight = height;
     const totalCells = gridWidth * gridHeight;
     const densities = {
         p1: Array(totalCells).fill(0),
         p2: Array(totalCells).fill(0)
     };
-    const walkable = Array(totalCells).fill(true);
-    const bases = [
-        { x: 3, y: Math.floor(gridHeight / 2), owner: 'p1' },
-        { x: gridWidth - 4, y: Math.floor(gridHeight / 2), owner: 'p2' }
-    ];
 
     for (const base of bases) {
         const idx = indexFor(base.x, base.y, gridWidth);
-        densities[base.owner][idx] = config.baseDensity;
+        densities[base.owner][idx] = settings.baseDensity ?? DEFAULT_CONFIG.baseDensity;
     }
 
     return {
+        mapId,
         grid: {
             width: gridWidth,
             height: gridHeight,
@@ -223,6 +268,9 @@ export class LiquidWarsGame extends GameEngine {
             const spawnRate = Number(normalizedSettings.spawnRate);
             normalizedSettings.spawnRate = Number.isFinite(spawnRate) ? spawnRate : DEFAULT_CONFIG.spawnRate;
         }
+        if (normalizedSettings.mapId && !LIQUIDWARS_MAPS[normalizedSettings.mapId]) {
+            normalizedSettings.mapId = DEFAULT_CONFIG.mapId;
+        }
 
         this.config = { ...DEFAULT_CONFIG, ...normalizedSettings };
         this.state = getInitialState(this.config);
@@ -394,7 +442,8 @@ export class LiquidWarsGame extends GameEngine {
                 if (this.onGameOver) {
                     this.onGameOver({
                         winnerId: this.state.round.winner,
-                        reason: this.state.round.winReason
+                        reason: this.state.round.winReason,
+                        baseCaptured: this.state.round.winReason === 'base captured'
                     });
                 }
             }
