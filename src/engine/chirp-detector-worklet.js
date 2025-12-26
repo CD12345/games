@@ -119,6 +119,65 @@ class ChirpDetectorProcessor extends AudioWorkletProcessor {
         return denom > 0.0001 ? sum / denom : 0;
     }
 
+    // Find precise peak location with sub-sample interpolation
+    // Returns { lagOffset, correlation } where lagOffset is samples relative to initialLag
+    findPrecisePeak(initialLag, blockSize) {
+        const searchRadius = blockSize * 2;  // Search ±2 blocks
+        const coarseStep = 16;               // Coarse search every 16 samples
+        const fineStep = 4;                  // Fine search every 4 samples
+
+        // Coarse search to find approximate peak
+        let bestLag = initialLag;
+        let bestCorr = Math.abs(this.correlateAt(initialLag));
+
+        for (let offset = -searchRadius; offset <= searchRadius; offset += coarseStep) {
+            const lag = (initialLag + offset + this.bufferSize) % this.bufferSize;
+            const corr = Math.abs(this.correlateAt(lag));
+            if (corr > bestCorr) {
+                bestCorr = corr;
+                bestLag = lag;
+            }
+        }
+
+        // Fine search around coarse peak
+        const fineStart = bestLag;
+        for (let offset = -coarseStep; offset <= coarseStep; offset += fineStep) {
+            const lag = (fineStart + offset + this.bufferSize) % this.bufferSize;
+            const corr = Math.abs(this.correlateAt(lag));
+            if (corr > bestCorr) {
+                bestCorr = corr;
+                bestLag = lag;
+            }
+        }
+
+        // Parabolic interpolation for sub-sample precision
+        const lagM1 = (bestLag - fineStep + this.bufferSize) % this.bufferSize;
+        const lagP1 = (bestLag + fineStep) % this.bufferSize;
+
+        const y0 = Math.abs(this.correlateAt(lagM1));
+        const y1 = bestCorr;
+        const y2 = Math.abs(this.correlateAt(lagP1));
+
+        // Parabolic interpolation: peak at x = (y0-y2) / (2*(y0-2*y1+y2))
+        // x is in range [-0.5, 0.5] relative to the step size
+        let subSampleOffset = 0;
+        const denom = y0 - 2 * y1 + y2;
+        if (Math.abs(denom) > 0.0001) {
+            subSampleOffset = ((y0 - y2) / (2 * denom)) * fineStep;
+        }
+
+        // Total offset from initialLag in samples
+        let lagDiff = bestLag - initialLag;
+        // Handle circular buffer wraparound
+        if (lagDiff > this.bufferSize / 2) lagDiff -= this.bufferSize;
+        if (lagDiff < -this.bufferSize / 2) lagDiff += this.bufferSize;
+
+        return {
+            sampleOffset: lagDiff + subSampleOffset,
+            correlation: bestCorr
+        };
+    }
+
     process(inputs, outputs, parameters) {
         const input = inputs[0];
         if (!input || !input[0]) return true;
@@ -190,15 +249,23 @@ class ChirpDetectorProcessor extends AudioWorkletProcessor {
         // Require both SNR threshold AND minimum absolute correlation
         // This prevents detecting noise even when noise floor is very low
         if (!isExcluded && correlation > threshold && correlation >= this.minCorrelation && timeSinceLastPeak > this.minPeakInterval) {
-            this.lastPeakFrame = peakFrame;
+            // Find precise peak location with interpolation
+            const precise = this.findPrecisePeak(correlationLag, blockSize);
+
+            // Calculate precise peak frame
+            // The initial peakFrame assumed chirp at correlationLag
+            // The precise search found the actual peak at correlationLag + sampleOffset
+            const precisePeakFrame = peakFrame + precise.sampleOffset;
+
+            this.lastPeakFrame = Math.round(precisePeakFrame);
 
             // Send detection to main thread
             this.port.postMessage({
                 type: 'chirpDetected',
-                peakFrame: peakFrame,
-                correlation: correlation,
+                peakFrame: precisePeakFrame,  // Now includes sub-sample precision
+                correlation: precise.correlation,
                 noiseFloor: this.noiseFloor,
-                snr: 20 * Math.log10(correlation / this.noiseFloor)
+                snr: 20 * Math.log10(precise.correlation / this.noiseFloor)
             });
         }
 

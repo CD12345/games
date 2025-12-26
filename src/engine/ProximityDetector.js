@@ -296,6 +296,9 @@ export class ProximityDetector {
 
         const { peakFrame, correlation, noiseFloor, snr } = data;
 
+        // Sync timebase before converting to minimize drift errors
+        this.syncTimeBase();
+
         // Convert frame to performance.now() time
         const rxTimeMs = this.frameToPerformanceTime(peakFrame);
 
