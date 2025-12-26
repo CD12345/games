@@ -61,14 +61,33 @@ Open `index.html` for the lobby/menu or `game.html?code=XXXX&host=true&game=pong
 All game coordinates are normalized (0-1 range) and scaled during rendering. This ensures consistent behavior across different screen sizes.
 
 ### Proximity Detection (DS-TWR)
-Uses Double-Sided Two-Way Ranging to measure distance between devices via ultrasonic audio chirps (15kHz).
+Uses Double-Sided Two-Way Ranging to measure distance between devices via ultrasonic audio chirps.
+
+**Signal Design:**
+- Linear frequency chirp sweeping 14kHz → 16kHz over 30ms
+- Raised cosine envelope for smooth start/end (reduces spectral leakage)
+- Chirp template pre-generated for matched filter correlation
+
+**Detection Pipeline:**
+1. **AudioWorklet** (`chirp-detector-worklet.js`) processes audio in real-time
+2. **Goertzel algorithm** detects energy in chirp band (fast single-frequency detection)
+3. When energy exceeds threshold, buffer is sent to main thread
+4. **Matched filter correlation** slides chirp template across buffer to find precise arrival
+5. **Parabolic interpolation** refines peak location for sub-sample accuracy
+6. Frame number converted to `performance.now()` timebase with latency compensation
+
+**Timing Accuracy:**
+- AudioWorklet provides sample-accurate frame numbers
+- Matched filter correlation finds chirp start within the buffer
+- Parabolic interpolation: `offset = (y0 - y2) / (2 * (y0 - 2*y1 + y2))` gives sub-sample precision
+- Latency compensation accounts for audio output/input pipeline delays
 
 **Half-duplex protocol** - never emit and listen simultaneously:
-- When emitting, ignore all audio detection
-- After emitting, wait 50ms for chirp to end before listening
+- When emitting, worklet ignores detections until chirp ends
 - After detecting, wait 50ms before responding (ensures sender's chirp has ended)
+- 30ms deaf period after emission to avoid self-echo
 
-**Algorithm flow:**
+**DS-TWR Algorithm flow:**
 1. Host emits chirp (30ms), records T_tx1, enters wait_rx1 state
 2. Guest detects chirp (T_rx1), waits 50ms, then emits response (T_tx1)
 3. Host detects response (T_rx1), waits 50ms, emits chirp 2 (T_tx2)
@@ -77,6 +96,9 @@ Uses Double-Sided Two-Way Ranging to measure distance between devices via ultras
 6. Distance = ToF × speed of sound (1125 ft/s)
 
 DS-TWR cancels clock drift errors by using timing measurements from both devices.
+
+**Fallback Mode:**
+If AudioWorklet is unavailable, falls back to AnalyserNode with threshold-based detection (less accurate but more compatible).
 
 ### TURN Server Configuration
 P2P connections use Metered.ca TURN servers for NAT traversal. Credentials are fetched dynamically in `src/core/peer.js`. Required for cross-network connections (e.g., phone to PC on different networks).
