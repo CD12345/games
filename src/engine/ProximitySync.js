@@ -35,6 +35,14 @@ export class ProximitySync {
             }
         };
 
+        // Wait for calibration before starting ranging (host only)
+        this.detector.onCalibrated = (noiseFloor) => {
+            debugLog(`ProximitySync: Calibration complete, noise floor = ${noiseFloor.toFixed(4)}`);
+            if (this.isHost && this.isRunning && !this.rangingInterval) {
+                this.startRanging();
+            }
+        };
+
         // Guest: Handle chirp detection to respond in DS-TWR sequence
         if (!this.isHost) {
             this.detector.onChirpDetected = (rxTime, amplitude) => {
@@ -62,8 +70,8 @@ export class ProximitySync {
 
         this.isRunning = true;
 
-        // Host initiates periodic ranging
-        if (this.isHost && available) {
+        // Host: Start ranging after calibration (or immediately if already calibrated/fallback)
+        if (this.isHost && available && this.detector.getIsCalibrated()) {
             this.startRanging();
         }
 
