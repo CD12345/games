@@ -68,6 +68,10 @@ export class ProximityDetector {
 
         // Latency compensation (in ms)
         this.outputLatencyMs = 0;
+        this.selfLatencyMs = 0;          // Measured loopback latency (output + input)
+        this.isCalibrating = false;
+        this.calibrationTxTime = 0;
+        this.calibrationSamples = [];
 
         // Time synchronization between AudioContext and performance.now()
         this.contextTimeOffset = 0;
@@ -302,9 +306,9 @@ export class ProximityDetector {
         // Convert frame to performance.now() time
         const rxTimeMs = this.frameToPerformanceTime(peakFrame);
 
-        // Check deaf period by timestamp (more reliable than isEmitting flag due to async timing)
-        // This catches self-detection even when the worklet message arrives after emit returns
-        if (rxTimeMs < this.emitEndTime) {
+        // During loopback calibration, we WANT to detect our own chirp
+        // Otherwise, check deaf period to avoid self-detection
+        if (!this.isCalibrating && rxTimeMs < this.emitEndTime) {
             debugLog(`Ignoring detection during deaf period: rx=${rxTimeMs.toFixed(0)}ms < deaf until ${this.emitEndTime.toFixed(0)}ms`);
             return;
         }
@@ -402,11 +406,21 @@ export class ProximityDetector {
         this.T_rx1_remote = remoteData.T_rx1;
         this.T_tx1_remote = remoteData.T_tx1;
         this.T_rx2_remote = remoteData.T_rx2;
+        const remoteLatency = remoteData.latency || 0;
 
-        const Tround1 = this.T_rx1 - this.T_tx1;
-        const Treply1 = this.T_tx1_remote - this.T_rx1_remote;
-        const Tround2 = this.T_rx2_remote - this.T_tx1_remote;
-        const Treply2 = this.T_tx2 - this.T_rx1;
+        // Raw measured values
+        const Tround1_raw = this.T_rx1 - this.T_tx1;
+        const Treply1_raw = this.T_tx1_remote - this.T_rx1_remote;
+        const Tround2_raw = this.T_rx2_remote - this.T_tx1_remote;
+        const Treply2_raw = this.T_tx2 - this.T_rx1;
+
+        // Apply latency corrections:
+        // - Round trips appear longer by device latency (subtract to correct)
+        // - Reply times appear shorter by device latency (add to correct)
+        const Tround1 = Tround1_raw - this.selfLatencyMs;
+        const Treply1 = Treply1_raw + remoteLatency;
+        const Tround2 = Tround2_raw - remoteLatency;
+        const Treply2 = Treply2_raw + this.selfLatencyMs;
 
         const numerator = (Tround1 * Tround2) - (Treply1 * Treply2);
         const denominator = Tround1 + Tround2 + Treply1 + Treply2;
@@ -420,6 +434,8 @@ export class ProximityDetector {
         const tofMs = numerator / denominator;
         const distanceFeet = (tofMs / 1000) * SPEED_OF_SOUND_FPS;
 
+        debugLog(`DS-TWR: Raw Tr1=${Tround1_raw.toFixed(1)} Tp1=${Treply1_raw.toFixed(1)} Tr2=${Tround2_raw.toFixed(1)} Tp2=${Treply2_raw.toFixed(1)}`);
+        debugLog(`DS-TWR: Corrected (selfL=${this.selfLatencyMs.toFixed(1)}, remoteL=${remoteLatency.toFixed(1)})`);
         debugLog(`DS-TWR: Tr1=${Tround1.toFixed(1)} Tp1=${Treply1.toFixed(1)} Tr2=${Tround2.toFixed(1)} Tp2=${Treply2.toFixed(1)}`);
         debugLog(`DS-TWR: ToF=${tofMs.toFixed(2)}ms -> ${distanceFeet.toFixed(1)}ft`);
 
@@ -463,7 +479,8 @@ export class ProximityDetector {
         const timingData = {
             T_rx1: this.T_rx1_remote,
             T_tx1: this.T_tx1_remote,
-            T_rx2: this.T_rx2_remote
+            T_rx2: this.T_rx2_remote,
+            latency: this.selfLatencyMs  // Include device latency for correction
         };
 
         this.resetRanging();
@@ -522,5 +539,71 @@ export class ProximityDetector {
 
     getIsCalibrated() {
         return this.isCalibrated;
+    }
+
+    getSelfLatency() {
+        return this.selfLatencyMs;
+    }
+
+    // === Loopback Calibration ===
+    // Measures device's audio pipeline latency by emitting and detecting own chirp
+
+    async runLoopbackCalibration(numSamples = 5) {
+        if (!this.isAvailable || !this.isCalibrated) {
+            debugLog('Loopback: Not ready (need noise floor calibration first)');
+            return false;
+        }
+
+        debugLog(`Loopback: Starting calibration (${numSamples} samples)...`);
+        this.calibrationSamples = [];
+        this.isCalibrating = true;
+
+        for (let i = 0; i < numSamples; i++) {
+            await this.runSingleLoopback();
+            // Wait between samples to let echoes die
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        this.isCalibrating = false;
+
+        if (this.calibrationSamples.length >= 3) {
+            // Use median to reject outliers
+            this.calibrationSamples.sort((a, b) => a - b);
+            const mid = Math.floor(this.calibrationSamples.length / 2);
+            this.selfLatencyMs = this.calibrationSamples[mid];
+            debugLog(`Loopback: Calibration complete, latency = ${this.selfLatencyMs.toFixed(1)}ms`);
+            return true;
+        } else {
+            debugLog('Loopback: Calibration failed (not enough samples)');
+            this.selfLatencyMs = 0;
+            return false;
+        }
+    }
+
+    runSingleLoopback() {
+        return new Promise((resolve) => {
+            // Temporarily capture chirp detection for calibration
+            const originalHandler = this.onChirpDetected;
+            const timeout = setTimeout(() => {
+                this.onChirpDetected = originalHandler;
+                debugLog('Loopback: Sample timeout');
+                resolve();
+            }, 200);
+
+            this.onChirpDetected = (rxTime, correlation) => {
+                clearTimeout(timeout);
+                this.onChirpDetected = originalHandler;
+
+                const latency = rxTime - this.calibrationTxTime;
+                if (latency > 0 && latency < 150) {  // Sanity check
+                    this.calibrationSamples.push(latency);
+                    debugLog(`Loopback: Sample ${this.calibrationSamples.length}, latency = ${latency.toFixed(1)}ms`);
+                }
+                resolve();
+            };
+
+            // Emit and record TX time
+            this.calibrationTxTime = this.emitChirp();
+        });
     }
 }
