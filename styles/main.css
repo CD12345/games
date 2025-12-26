@@ -61,17 +61,24 @@ body {
 }
 
 #select-game-screen {
-    overflow-y: auto;
     padding-bottom: 1.5rem;
 }
 
 #lobby-screen {
-    overflow-y: auto;
     padding-bottom: 1.5rem;
 }
 
 .hidden {
     display: none !important;
+}
+
+/* Scrollable content container */
+.scrollable-content {
+    width: 100%;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Typography */
@@ -255,8 +262,7 @@ h2 {
     flex-direction: column;
     gap: 0.75rem;
     margin: 1.5rem 0;
-    overflow-y: auto;
-    flex: 1;
+    flex-shrink: 0;
 }
 
 .game-card {
@@ -353,7 +359,7 @@ h2 {
     flex-direction: column;
     gap: 0.5rem;
     margin-bottom: 2rem;
-    flex: 1;
+    flex-shrink: 0;
 }
 
 .player-item {
@@ -407,11 +413,7 @@ h2 {
     padding: 1rem;
     background: var(--bg-secondary);
     border-radius: 12px;
-}
-
-#game-settings {
-    max-height: 45vh;
-    overflow-y: auto;
+    flex-shrink: 0;
 }
 
 .game-settings h3 {
