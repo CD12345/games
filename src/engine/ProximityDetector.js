@@ -26,9 +26,9 @@ const DEAF_PERIOD_MS = 30;          // Block self-echo (30ms chirp detected ~imm
 
 // Timing window for DS-TWR responses (reject detections outside this window)
 // Expected timing: sound travel (5-10ms) + processing (50ms) + sound back (5-10ms) ≈ 60-120ms
-// Add margin for variable latency
-const MIN_RESPONSE_TIME_MS = 40;    // Minimum time for a real response (reject echoes)
-const MAX_RESPONSE_TIME_MS = 250;   // Maximum time for a real response (reject late noise)
+// Add large margin for audio stack latency which can be 50-200ms on some devices
+const MIN_RESPONSE_TIME_MS = 30;    // Minimum time for a real response (reject echoes)
+const MAX_RESPONSE_TIME_MS = 500;   // Maximum time for a real response (allow for slow audio stacks)
 
 // Distance smoothing
 const SMOOTHING_FACTOR = 0.3;
@@ -313,7 +313,8 @@ export class ProximityDetector {
         const txTimeMs = performance.now() + this.outputLatencyMs;
 
         // Tell worklet to exclude this period from noise estimation and detection
-        if (this.workletNode) {
+        // BUT: during loopback calibration, we WANT to detect our own chirp
+        if (this.workletNode && !this.isCalibrating) {
             const startFrame = Math.floor(startTime * SAMPLE_RATE);
             const endFrame = Math.floor((startTime + CHIRP_DURATION + DEAF_PERIOD_MS / 1000) * SAMPLE_RATE);
             this.workletNode.port.postMessage({
@@ -429,7 +430,7 @@ export class ProximityDetector {
         this.isInitiator = true;
         this.rangingState = 'wait_rx1';
         this.T_tx1 = this.emitChirp();
-        this.setRangingTimeout(500);
+        this.setRangingTimeout(1000);  // 1 second timeout (network + audio latency)
         debugLog(`DS-TWR: Sent chirp 1 at ${this.T_tx1.toFixed(0)}ms, waiting for response`);
     }
 
@@ -502,7 +503,7 @@ export class ProximityDetector {
 
             this.T_tx1_remote = this.emitChirp();
             this.rangingState = 'wait_rx2';
-            this.setRangingTimeout(400);
+            this.setRangingTimeout(1000);  // 1 second timeout for chirp 2
 
             debugLog(`DS-TWR Responder: Rx1=${rxTime.toFixed(0)}, Tx1=${this.T_tx1_remote.toFixed(0)}`);
         }, RESPONSE_DELAY_MS);
@@ -645,9 +646,9 @@ export class ProximityDetector {
             return true;
         } else {
             debugLog(`Loopback: Calibration failed (only ${this.calibrationSamples.length} samples)`);
-            // Use a default estimate based on typical audio latency
-            this.selfLatencyMs = 50;  // Conservative default
-            debugLog('Loopback: Using default latency estimate of 50ms');
+            // Don't use a default - incorrect latency correction is worse than none
+            this.selfLatencyMs = 0;
+            debugLog('Loopback: Using 0ms latency (no correction)');
             return false;
         }
     }
