@@ -3,6 +3,7 @@
 import { GameEngine } from '../../engine/GameEngine.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
 import { LiquidWarsRenderer } from './LiquidWarsRenderer.js';
+import { deserializeSnapshot, serializeSnapshot } from './serialize.js';
 
 const DEFAULT_CONFIG = {
     gridWidth: 42,
@@ -214,6 +215,7 @@ export class LiquidWarsGame extends GameEngine {
         this.renderer = new LiquidWarsRenderer(canvas);
 
         this.network = new NetworkSync(gameCode, isHost);
+        this.network.syncInterval = 1000 / 12;
 
         this.pointer = {
             x: this.state.cursors[this.playerId].x,
@@ -226,6 +228,8 @@ export class LiquidWarsGame extends GameEngine {
         this.gameOverNotified = false;
         this.onGameOver = null;
         this.onGameReset = null;
+
+        this.lastDecodedState = null;
 
         this.handlePointerMove = this.handlePointerMove.bind(this);
         this.handleTouchMove = this.handleTouchMove.bind(this);
@@ -288,7 +292,7 @@ export class LiquidWarsGame extends GameEngine {
         } else {
             this.network.onStateUpdate = (state) => {
                 if (state) {
-                    this.state = state;
+                    this.receiveState(state);
                 }
             };
         }
@@ -296,7 +300,7 @@ export class LiquidWarsGame extends GameEngine {
         this.network.start();
 
         if (this.isHost) {
-            this.network.sendState(this.state);
+            this.sendSnapshot();
         }
     }
 
@@ -310,7 +314,7 @@ export class LiquidWarsGame extends GameEngine {
 
         if (this.isHost) {
             this.updateGameLogic(deltaTime);
-            this.network.sendState(this.state);
+            this.sendSnapshot();
         } else {
             this.network.updateInterpolation(deltaTime);
         }
@@ -405,19 +409,70 @@ export class LiquidWarsGame extends GameEngine {
         }
     }
 
+    sendSnapshot() {
+        const snapshot = serializeSnapshot(this.state.densities, this.state.grid);
+        this.network.sendState({
+            snapshot,
+            cursors: this.state.cursors,
+            round: this.state.round
+        });
+    }
+
+    receiveState(state) {
+        if (state.snapshot) {
+            const decoded = deserializeSnapshot(state.snapshot, this.state.grid);
+            const decodedState = {
+                ...this.state,
+                densities: decoded.densities,
+                totals: decoded.totals
+            };
+
+            if (state.cursors) {
+                decodedState.cursors = state.cursors;
+            }
+
+            if (state.round) {
+                decodedState.round = state.round;
+            }
+
+            this.network.previousState = this.lastDecodedState;
+            this.network.remoteState = decodedState;
+            this.network.interpolationAlpha = 0;
+            this.lastDecodedState = decodedState;
+            this.state = decodedState;
+            return;
+        }
+
+        this.state = state;
+        this.lastDecodedState = state;
+    }
+
     getInterpolatedState() {
         if (this.isHost || !this.network.remoteState) {
             return this.state;
         }
 
         if (!this.network.previousState) {
-            return this.network.remoteState;
+            return this.buildInterpolatedState(
+                this.state,
+                this.network.remoteState,
+                this.network.interpolationAlpha
+            );
         }
 
-        const alpha = this.network.interpolationAlpha;
-        const previous = this.network.previousState;
-        const current = this.network.remoteState;
+        return this.buildInterpolatedState(
+            this.network.previousState,
+            this.network.remoteState,
+            this.network.interpolationAlpha
+        );
+    }
 
+    render() {
+        const renderState = this.getInterpolatedState();
+        this.renderer.render(renderState, this.config);
+    }
+
+    buildInterpolatedState(previous, current, alpha) {
         const blended = {
             ...current,
             cursors: {
@@ -443,12 +498,18 @@ export class LiquidWarsGame extends GameEngine {
             };
         }
 
-        return blended;
-    }
+        if (previous.totals && current.totals) {
+            blended.totals = {
+                p1: previous.totals.p1 + (current.totals.p1 - previous.totals.p1) * alpha,
+                p2: previous.totals.p2 + (current.totals.p2 - previous.totals.p2) * alpha
+            };
+        }
 
-    render() {
-        const renderState = this.getInterpolatedState();
-        this.renderer.render(renderState, this.config);
+        if (previous.round && current.round) {
+            blended.round = current.round;
+        }
+
+        return blended;
     }
 
     destroy() {
