@@ -2,6 +2,7 @@
 
 import { GameEngine } from '../../engine/GameEngine.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
+import { LiquidWarsRenderer } from './LiquidWarsRenderer.js';
 
 const DEFAULT_CONFIG = {
     gridWidth: 42,
@@ -210,6 +211,7 @@ export class LiquidWarsGame extends GameEngine {
 
         this.config = { ...DEFAULT_CONFIG, ...settings };
         this.state = getInitialState(this.config);
+        this.renderer = new LiquidWarsRenderer(canvas);
 
         this.network = new NetworkSync(gameCode, isHost);
 
@@ -446,60 +448,7 @@ export class LiquidWarsGame extends GameEngine {
 
     render() {
         const renderState = this.getInterpolatedState();
-        const { width, height } = renderState.grid;
-        const cellWidth = this.canvas.width / width;
-        const cellHeight = this.canvas.height / height;
-
-        this.clear('#101523');
-
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const index = indexFor(x, y, width);
-                const p1Density = renderState.densities.p1[index];
-                const p2Density = renderState.densities.p2[index];
-                if (p1Density <= 0 && p2Density <= 0) {
-                    continue;
-                }
-
-                let fill = null;
-                if (p1Density > p2Density) {
-                    const alpha = clamp(p1Density / this.config.maxDensityForColor, 0.1, 1);
-                    fill = `rgba(80, 160, 255, ${alpha})`;
-                } else {
-                    const alpha = clamp(p2Density / this.config.maxDensityForColor, 0.1, 1);
-                    fill = `rgba(255, 96, 96, ${alpha})`;
-                }
-
-                this.ctx.fillStyle = fill;
-                this.ctx.fillRect(x * cellWidth, y * cellHeight, cellWidth, cellHeight);
-            }
-        }
-
-        for (const base of renderState.bases) {
-            const centerX = (base.x + 0.5) * cellWidth;
-            const centerY = (base.y + 0.5) * cellHeight;
-            this.ctx.beginPath();
-            this.ctx.fillStyle = base.owner === 'p1' ? '#2f7efb' : '#f25454';
-            this.ctx.arc(centerX, centerY, Math.max(cellWidth, cellHeight) * 0.6, 0, Math.PI * 2);
-            this.ctx.fill();
-        }
-
-        const cursorRadius = Math.max(cellWidth, cellHeight) * 0.5;
-        this.drawCursor(renderState.cursors.p1, '#99c5ff', cursorRadius);
-        this.drawCursor(renderState.cursors.p2, '#ffb3b3', cursorRadius);
-    }
-
-    drawCursor(cursor, color, radius) {
-        if (!cursor) {
-            return;
-        }
-        const x = cursor.x * this.canvas.width;
-        const y = cursor.y * this.canvas.height;
-        this.ctx.beginPath();
-        this.ctx.strokeStyle = color;
-        this.ctx.lineWidth = 2;
-        this.ctx.arc(x, y, radius, 0, Math.PI * 2);
-        this.ctx.stroke();
+        this.renderer.render(renderState, this.config);
     }
 
     destroy() {
