@@ -22,7 +22,7 @@ const SPEED_OF_SOUND_FPS = 1125;    // feet per second at room temp
 
 // Protocol timing
 const RESPONSE_DELAY_MS = 50;       // Wait before responding to ensure chirp ended
-const DEAF_PERIOD_MS = 50;          // Extra margin after chirp for echo to die
+const DEAF_PERIOD_MS = 30;          // Block self-echo (30ms chirp detected ~immediately, this blocks echo)
 
 // Distance smoothing
 const SMOOTHING_FACTOR = 0.3;
@@ -292,12 +292,19 @@ export class ProximityDetector {
     // === Detection Handling ===
 
     handleWorkletDetection(data) {
-        if (!this.isRunning || this.isEmitting) return;
+        if (!this.isRunning) return;
 
         const { peakFrame, correlation, noiseFloor, snr } = data;
 
         // Convert frame to performance.now() time
         const rxTimeMs = this.frameToPerformanceTime(peakFrame);
+
+        // Check deaf period by timestamp (more reliable than isEmitting flag due to async timing)
+        // This catches self-detection even when the worklet message arrives after emit returns
+        if (rxTimeMs < this.emitEndTime) {
+            debugLog(`Ignoring detection during deaf period: rx=${rxTimeMs.toFixed(0)}ms < deaf until ${this.emitEndTime.toFixed(0)}ms`);
+            return;
+        }
 
         debugLog(`Chirp detected: corr=${correlation.toFixed(3)}, noise=${noiseFloor.toFixed(4)}, SNR=${snr.toFixed(1)}dB, rx=${rxTimeMs.toFixed(0)}ms`);
 
