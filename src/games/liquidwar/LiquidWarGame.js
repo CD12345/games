@@ -571,18 +571,16 @@ export class LiquidWarGame extends GameEngine {
                 const neighbor = this.getParticleAt(nx, ny);
                 if (neighbor && neighbor.team !== particle.team) {
                     const myGrad = this.gradients[particle.team];
-                    const theirGrad = this.gradients[neighbor.team];
+                    if (!myGrad) continue;
 
-                    if (!myGrad || !theirGrad) continue;
+                    const myCurrentDist = myGrad[particle.y]?.[particle.x];
+                    const enemyPosOnMyGrad = myGrad[neighbor.y]?.[neighbor.x];
 
-                    const myDist = myGrad[particle.y]?.[particle.x];
-                    const theirDist = theirGrad[neighbor.y]?.[neighbor.x];
+                    if (myCurrentDist === undefined || enemyPosOnMyGrad === undefined) continue;
 
-                    if (myDist === undefined || theirDist === undefined) continue;
-
-                    // Particle FAR from its cursor is "pushing" harder
-                    // The one with higher distance to their own cursor is attacking
-                    if (myDist >= theirDist) {
+                    // If enemy's cell is closer to MY cursor than my current cell,
+                    // the enemy is blocking my path - I attack them
+                    if (enemyPosOnMyGrad < myCurrentDist) {
                         neighbor.health -= config.attackDamage;
                     }
                 }
