@@ -97,6 +97,7 @@ let currentSettings = {}; // Current game settings values
 let currentSettingsGameId = null;
 let selectedGameType = null;
 let selectedGameCard = null;
+let lastConnectedCount = 1; // Track connected human players (host = 1)
 
 const NAME_SCREENS = new Set(['mainMenu', 'joinScreen']);
 const ADJECTIVES = [
@@ -1096,6 +1097,9 @@ function updatePlayerList(players) {
         if (player.connected) connectedCount++;
     });
 
+    // Store for use when starting game
+    lastConnectedCount = connectedCount;
+
     const isLinked = sessionStorage.getItem('sessionLinked') === 'true';
     if (elements.codeDisplay && elements.codeHint && isLinked) {
         elements.codeDisplay.classList.add('hidden');
@@ -1165,6 +1169,10 @@ async function handleStartGame() {
         ensureCurrentSettings(currentGameType);
         elements.btnStartGame.disabled = true;
         elements.btnStartGame.textContent = 'Starting...';
+
+        // Add connected human count to settings so game knows who is AI
+        currentSettings.connectedHumans = lastConnectedCount;
+
         storeSession();
         await startGame(currentGameCode, currentSettings);
 
