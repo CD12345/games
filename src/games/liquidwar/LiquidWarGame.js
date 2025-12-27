@@ -15,7 +15,6 @@ import {
     getInitialState,
     getMapIdFromSetting,
 } from './config.js';
-import { GradientWorkerPool, supportsWorkers } from './GradientWorkerPool.js';
 
 // Direction offsets for 8-directional movement
 const DIRECTIONS = [
@@ -87,16 +86,10 @@ export class LiquidWarGame extends GameEngine {
         // AI state for each AI player
         this.aiState = {};
 
-        // Pre-allocated buffers for performance (fallback when workers unavailable)
-        this.gradientBuffer = null;
+        // Pre-allocated buffers for performance
         this.visitedBuffer = null;
         this.queueBuffer = null;
-        this.lastCursorPositions = {};
-
-        // Web Worker pool for parallel gradient computation
-        this.workerPool = null;
-        this.useWorkers = false; // Temporarily disabled to debug - was: supportsWorkers();
-        this.pendingGradients = null;  // Promise for async gradient computation
+        this.gradientArrays = {};
 
         // Game over handling
         this.onGameOver = null;
@@ -207,20 +200,6 @@ export class LiquidWarGame extends GameEngine {
 
         // Set up renderer with map
         this.renderer.setMap(this.walls, this.gridWidth, this.gridHeight);
-
-        // Initialize Web Worker pool for gradient computation (host only)
-        if (this.isHost && this.useWorkers) {
-            try {
-                // Use 2 workers - good balance for mobile and desktop
-                this.workerPool = new GradientWorkerPool(2);
-                await this.workerPool.initialize(this.walls, this.gridWidth, this.gridHeight);
-                debugLog('Gradient workers initialized (2 workers)');
-            } catch (e) {
-                debugLog('Workers failed, using fallback: ' + e.message);
-                this.useWorkers = false;
-                this.workerPool = null;
-            }
-        }
 
         // Initialize particles (host only)
         if (this.isHost) {
@@ -852,56 +831,28 @@ export class LiquidWarGame extends GameEngine {
         // Update AI cursors
         this.updateAICursors();
 
-        // Compute gradients (async with workers, or sync fallback)
+        // Compute gradients for all players
         this.computeGradients();
 
-        // Only process if we have gradients (workers may still be computing)
-        if (Object.keys(this.gradients).length > 0) {
-            // Move particles and handle combat
-            this.moveParticles();
-            this.handleCombat();
+        // Move particles and handle combat
+        this.moveParticles();
+        this.handleCombat();
 
-            // Update particle counts
-            this.updateParticleCounts();
+        // Update particle counts
+        this.updateParticleCounts();
 
-            // Check for winner - game ends when only one team has particles
-            const teamsWithParticles = this.getTeamsWithParticles();
-            if (teamsWithParticles.length <= 1) {
-                this.endGame();
-            }
+        // Check for winner - game ends when only one team has particles
+        const teamsWithParticles = this.getTeamsWithParticles();
+        if (teamsWithParticles.length <= 1) {
+            this.endGame();
         }
     }
 
-    // Compute gradients - uses workers if available, otherwise sync
+    // Compute gradients for all players (optimized with typed arrays)
     computeGradients() {
-        if (this.workerPool && this.useWorkers) {
-            // Async path: kick off computation, results used next tick
-            if (!this.pendingGradients) {
-                // Build cursor positions for active players only
-                const cursors = {};
-                for (let i = 1; i <= this.totalPlayers; i++) {
-                    const pid = `p${i}`;
-                    if (this.state.cursors[pid]) {
-                        cursors[pid] = this.state.cursors[pid];
-                    }
-                }
-
-                this.pendingGradients = this.workerPool.computeAllGradients(cursors)
-                    .then(gradients => {
-                        this.gradients = gradients;
-                        this.pendingGradients = null;
-                    })
-                    .catch(e => {
-                        debugLog('Worker error: ' + e.message);
-                        this.pendingGradients = null;
-                    });
-            }
-        } else {
-            // Sync fallback: compute all gradients immediately
-            for (let i = 1; i <= this.totalPlayers; i++) {
-                const pid = `p${i}`;
-                this.gradients[pid] = this.calculateGradient(pid);
-            }
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            this.gradients[pid] = this.calculateGradient(pid);
         }
     }
 
@@ -1301,12 +1252,6 @@ export class LiquidWarGame extends GameEngine {
         super.destroy();
         this.input.destroy();
         this.network.stop();
-
-        // Clean up worker pool
-        if (this.workerPool) {
-            this.workerPool.destroy();
-            this.workerPool = null;
-        }
 
         if (this.isHost) {
             offMessage('rematch_request');
