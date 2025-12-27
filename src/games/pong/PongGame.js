@@ -185,10 +185,14 @@ export class PongGame extends GameEngine {
         const { ball, paddles, scores, round } = this.state;
         const config = PONG_CONFIG;
 
+        // Host updates elapsed time for all phases
+        if (this.isHost) {
+            round.elapsed = Date.now() - round.startTime;
+        }
+
         // Handle round phases
         if (round.phase === 'countdown') {
-            const elapsed = Date.now() - round.startTime;
-            if (elapsed >= config.game.launchDelay) {
+            if (round.elapsed >= config.game.launchDelay) {
                 // Launch the ball
                 this.launchBall();
                 round.phase = 'playing';
@@ -206,8 +210,7 @@ export class PongGame extends GameEngine {
         }
 
         if (round.phase === 'scored') {
-            const elapsed = Date.now() - round.startTime;
-            if (elapsed >= 1500) {
+            if (round.elapsed >= 1500) {
                 // Start new round
                 this.resetBall(round.lastScorer === 'p1' ? 'p2' : 'p1');
             }
@@ -304,6 +307,7 @@ export class PongGame extends GameEngine {
 
         round.phase = 'scored';
         round.startTime = Date.now();
+        round.elapsed = 0;  // Reset elapsed time for scored phase
         round.lastScorer = playerId;
 
         // Check for game over
@@ -333,6 +337,7 @@ export class PongGame extends GameEngine {
 
         round.phase = 'countdown';
         round.startTime = Date.now();
+        round.elapsed = 0;  // Reset elapsed time for new countdown
     }
 
     resetMatch() {

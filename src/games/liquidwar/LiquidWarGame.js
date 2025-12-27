@@ -809,11 +809,14 @@ export class LiquidWarGame extends GameEngine {
 
     // Main game logic tick (host only)
     tick() {
+        // Update elapsed time for sync across all clients
+        this.state.elapsed = Date.now() - this.state.startTime;
+
         if (this.state.phase === 'countdown') {
-            const elapsed = Date.now() - this.state.startTime;
-            if (elapsed >= LIQUID_WAR_CONFIG.game.countdownTime) {
+            if (this.state.elapsed >= LIQUID_WAR_CONFIG.game.countdownTime) {
                 this.state.phase = 'playing';
                 this.state.startTime = Date.now();
+                this.state.elapsed = 0;
                 debugLog('Phase changed to playing');
             }
             return;
@@ -822,8 +825,7 @@ export class LiquidWarGame extends GameEngine {
         if (this.state.phase !== 'playing') return;
 
         // Check time limit
-        const elapsed = Date.now() - this.state.startTime;
-        if (elapsed >= LIQUID_WAR_CONFIG.game.maxTime) {
+        if (this.state.elapsed >= LIQUID_WAR_CONFIG.game.maxTime) {
             this.endGame();
             return;
         }
