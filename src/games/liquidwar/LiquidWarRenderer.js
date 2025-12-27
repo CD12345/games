@@ -95,8 +95,11 @@ export class LiquidWarRenderer {
         ctx.fillStyle = LIQUID_WAR_CONFIG.colors.floor;
         ctx.fillRect(0, 0, width, height);
 
-        // Calculate scaling to fit grid in canvas
-        const scale = Math.min(width / gridWidth, height / gridHeight);
+        // Calculate scaling with margin for cursor "pulling" space
+        const margin = LIQUID_WAR_CONFIG.display?.mapMargin || 0.1;
+        const availableWidth = width * (1 - margin * 2);
+        const availableHeight = height * (1 - margin * 2);
+        const scale = Math.min(availableWidth / gridWidth, availableHeight / gridHeight);
         if (scale <= 0 || !isFinite(scale)) {
             return;
         }
@@ -122,12 +125,12 @@ export class LiquidWarRenderer {
             this.renderParticles(ctx, particleGrid, gridWidth, gridHeight);
         }
 
-        // Draw cursors
-        if (state.cursors) {
-            this.renderCursors(ctx, state.cursors, gridWidth, gridHeight, playerNumber);
-        }
-
         ctx.restore();
+
+        // Draw cursors in viewport space (so they can appear in margins)
+        if (state.cursors) {
+            this.renderCursorsViewport(ctx, state.cursors, width, height, gridWidth, gridHeight, scale, offsetX, offsetY, playerNumber);
+        }
 
         // Draw UI overlay
         this.renderUI(state, playerNumber);
@@ -215,6 +218,51 @@ export class LiquidWarRenderer {
                 ctx.arc(x, y, radius * 1.3, 0, Math.PI * 2);
                 ctx.strokeStyle = LIQUID_WAR_CONFIG.colors.cursor;
                 ctx.lineWidth = 1 / Math.min(gridWidth, gridHeight) * 10;
+                ctx.stroke();
+            }
+        });
+    }
+
+    renderCursorsViewport(ctx, cursors, viewWidth, viewHeight, gridWidth, gridHeight, scale, offsetX, offsetY, playerNumber) {
+        // Draw cursors in viewport space - allows them to appear in margins
+        const colors = LIQUID_WAR_CONFIG.colors.teams;
+        const radius = 12; // Fixed pixel radius in viewport space
+
+        ['p1', 'p2'].forEach((playerId, index) => {
+            const cursor = cursors[playerId];
+            if (!cursor) return;
+
+            // Convert normalized cursor position (0-1) to viewport coordinates
+            // Cursor can go into margins for "pulling" effect
+            const x = offsetX + cursor.x * gridWidth * scale;
+            const y = offsetY + cursor.y * gridHeight * scale;
+
+            // Draw cursor circle
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = colors[index];
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Draw crosshair
+            const crossSize = radius * 0.7;
+            ctx.beginPath();
+            ctx.moveTo(x - crossSize, y);
+            ctx.lineTo(x + crossSize, y);
+            ctx.moveTo(x, y - crossSize);
+            ctx.lineTo(x, y + crossSize);
+            ctx.strokeStyle = colors[index];
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw "You" indicator
+            const isYou = (playerId === 'p1' && playerNumber === 1) ||
+                          (playerId === 'p2' && playerNumber === 2);
+            if (isYou) {
+                ctx.beginPath();
+                ctx.arc(x, y, radius * 1.4, 0, Math.PI * 2);
+                ctx.strokeStyle = LIQUID_WAR_CONFIG.colors.cursor;
+                ctx.lineWidth = 2;
                 ctx.stroke();
             }
         });

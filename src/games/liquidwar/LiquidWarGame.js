@@ -284,8 +284,12 @@ export class LiquidWarGame extends GameEngine {
     // Calculate gradient (distance field) from cursor to all walkable cells
     calculateGradient(team) {
         const cursor = this.state.cursors[team];
-        const cursorX = Math.floor(cursor.x * this.gridWidth);
-        const cursorY = Math.floor(cursor.y * this.gridHeight);
+        // Clamp cursor to grid bounds for gradient calculation
+        // (cursor can be in margin area for pulling effect, but gradient uses edge)
+        const clampedX = Math.max(0, Math.min(0.999, cursor.x));
+        const clampedY = Math.max(0, Math.min(0.999, cursor.y));
+        const cursorX = Math.max(0, Math.min(this.gridWidth - 1, Math.floor(clampedX * this.gridWidth)));
+        const cursorY = Math.max(0, Math.min(this.gridHeight - 1, Math.floor(clampedY * this.gridHeight)));
 
         // Initialize gradient with Infinity
         const gradient = [];
@@ -424,19 +428,22 @@ export class LiquidWarGame extends GameEngine {
                 const moveSpeed = Math.min(speed * 3, dist * 0.15);
                 const moveX = (dx / dist) * moveSpeed;
                 const moveY = (dy / dist) * moveSpeed;
-                cursor.x = Math.max(0, Math.min(1, cursor.x + moveX));
-                cursor.y = Math.max(0, Math.min(1, cursor.y + moveY));
+                // Allow cursor to go slightly into margin area for "pulling" effect
+                const margin = LIQUID_WAR_CONFIG.display?.mapMargin || 0.1;
+                cursor.x = Math.max(-margin, Math.min(1 + margin, cursor.x + moveX));
+                cursor.y = Math.max(-margin, Math.min(1 + margin, cursor.y + moveY));
             }
         } else {
             // Clear smoothed touch when not touching
             this.smoothedTouch = null;
 
-            // Keyboard input
+            // Keyboard input - allow cursor into margin area
+            const margin = LIQUID_WAR_CONFIG.display?.mapMargin || 0.1;
             const keys = this.input.getKeys();
-            if (keys.up) cursor.y = Math.max(0, cursor.y - speed);
-            if (keys.down) cursor.y = Math.min(1, cursor.y + speed);
-            if (keys.left) cursor.x = Math.max(0, cursor.x - speed);
-            if (keys.right) cursor.x = Math.min(1, cursor.x + speed);
+            if (keys.up) cursor.y = Math.max(-margin, cursor.y - speed);
+            if (keys.down) cursor.y = Math.min(1 + margin, cursor.y + speed);
+            if (keys.left) cursor.x = Math.max(-margin, cursor.x - speed);
+            if (keys.right) cursor.x = Math.min(1 + margin, cursor.x + speed);
         }
     }
 

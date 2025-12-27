@@ -528,6 +528,35 @@ h2 {
     cursor: not-allowed;
 }
 
+/* Preview display */
+.setting-preview {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.map-preview-canvas {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+/* Make preview item stack vertically */
+.setting-item:has(.setting-preview) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.setting-item:has(.setting-preview) .setting-label {
+    text-align: center;
+}
+
+.setting-item:has(.setting-preview) .setting-control {
+    justify-content: center;
+}
+
 /* Responsive adjustments */
 @media (max-height: 600px) {
     #app {
