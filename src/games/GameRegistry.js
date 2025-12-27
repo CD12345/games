@@ -24,6 +24,8 @@ export const GameRegistry = {
             icon: config.icon || '🎮',
             gameClass: config.gameClass,
             getInitialState: config.getInitialState,
+            getPreview: config.getPreview || null,
+            supportsAI: config.supportsAI || false,
             debugOnly: config.debugOnly || false,
             settings: config.settings || []
         });
