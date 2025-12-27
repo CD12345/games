@@ -139,21 +139,24 @@ export class LiquidWarRenderer {
     renderParticles(ctx, particleGrid, gridWidth, gridHeight) {
         const colors = LIQUID_WAR_CONFIG.colors.teams;
 
+        // Pre-parse all team colors
+        const teamColors = {};
+        for (let i = 0; i < colors.length; i++) {
+            teamColors[`p${i + 1}`] = this.hexToRgb(colors[i]);
+        }
+
         // Try fast ImageData path first
         if (this.particleCanvas && this.particleCtx) {
             const imageData = this.particleCtx.createImageData(gridWidth, gridHeight);
             const data = imageData.data;
-
-            const p1Color = this.hexToRgb(colors[0]);
-            const p2Color = this.hexToRgb(colors[1]);
 
             for (let y = 0; y < gridHeight; y++) {
                 for (let x = 0; x < gridWidth; x++) {
                     const i = (y * gridWidth + x) * 4;
                     const particle = particleGrid[y]?.[x];
 
-                    if (particle) {
-                        const color = particle.team === 'p1' ? p1Color : p2Color;
+                    if (particle && teamColors[particle.team]) {
+                        const color = teamColors[particle.team];
                         data[i] = color.r;
                         data[i + 1] = color.g;
                         data[i + 2] = color.b;
@@ -173,7 +176,8 @@ export class LiquidWarRenderer {
                 for (let x = 0; x < gridWidth; x++) {
                     const particle = particleGrid[y]?.[x];
                     if (particle) {
-                        ctx.fillStyle = particle.team === 'p1' ? colors[0] : colors[1];
+                        const teamIndex = parseInt(particle.team.slice(1)) - 1;
+                        ctx.fillStyle = colors[teamIndex] || colors[0];
                         ctx.fillRect(x, y, 1, 1);
                     }
                 }
@@ -185,10 +189,12 @@ export class LiquidWarRenderer {
         const radius = LIQUID_WAR_CONFIG.cursor.radius * Math.min(gridWidth, gridHeight);
         const colors = LIQUID_WAR_CONFIG.colors.teams;
 
-        ['p1', 'p2'].forEach((playerId, index) => {
+        // Render cursors for all players
+        Object.keys(cursors).forEach((playerId) => {
             const cursor = cursors[playerId];
             if (!cursor) return;
 
+            const index = parseInt(playerId.slice(1)) - 1;
             const x = cursor.x * gridWidth;
             const y = cursor.y * gridHeight;
 
@@ -228,9 +234,11 @@ export class LiquidWarRenderer {
         const colors = LIQUID_WAR_CONFIG.colors.teams;
         const radius = 12; // Fixed pixel radius in viewport space
 
-        ['p1', 'p2'].forEach((playerId, index) => {
+        Object.keys(cursors).forEach((playerId) => {
             const cursor = cursors[playerId];
             if (!cursor) return;
+
+            const index = parseInt(playerId.slice(1)) - 1;
 
             // Convert normalized cursor position (0-1) to viewport coordinates
             // Cursor can go into margins for "pulling" effect
@@ -240,7 +248,7 @@ export class LiquidWarRenderer {
             // Draw cursor circle
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
-            ctx.strokeStyle = colors[index];
+            ctx.strokeStyle = colors[index % colors.length];
             ctx.lineWidth = 3;
             ctx.stroke();
 
@@ -251,13 +259,12 @@ export class LiquidWarRenderer {
             ctx.lineTo(x + crossSize, y);
             ctx.moveTo(x, y - crossSize);
             ctx.lineTo(x, y + crossSize);
-            ctx.strokeStyle = colors[index];
+            ctx.strokeStyle = colors[index % colors.length];
             ctx.lineWidth = 2;
             ctx.stroke();
 
             // Draw "You" indicator
-            const isYou = (playerId === 'p1' && playerNumber === 1) ||
-                          (playerId === 'p2' && playerNumber === 2);
+            const isYou = playerId === `p${playerNumber}`;
             if (isYou) {
                 ctx.beginPath();
                 ctx.arc(x, y, radius * 1.4, 0, Math.PI * 2);
@@ -272,12 +279,16 @@ export class LiquidWarRenderer {
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
+        const colors = LIQUID_WAR_CONFIG.colors.teams;
 
-        // Draw particle counts
-        const counts = state.particleCounts || { p1: 0, p2: 0 };
-        const total = counts.p1 + counts.p2 || 1;
-        const p1Percent = Math.round((counts.p1 / total) * 100);
-        const p2Percent = 100 - p1Percent;
+        // Get player count and particle counts
+        const totalPlayers = state.playerCount || 2;
+        const counts = state.particleCounts || {};
+        let totalParticles = 0;
+        for (let i = 1; i <= totalPlayers; i++) {
+            totalParticles += counts[`p${i}`] || 0;
+        }
+        if (totalParticles === 0) totalParticles = 1;
 
         // Score bar at top
         const barHeight = 20;
@@ -289,32 +300,42 @@ export class LiquidWarRenderer {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(barPadding, barY, barWidth, barHeight);
 
-        // Draw P1 portion
-        const p1Width = (counts.p1 / total) * barWidth;
-        ctx.fillStyle = LIQUID_WAR_CONFIG.colors.teams[0];
-        ctx.fillRect(barPadding, barY, p1Width, barHeight);
+        // Draw each player's portion of the bar
+        let currentX = barPadding;
+        for (let i = 1; i <= totalPlayers; i++) {
+            const pid = `p${i}`;
+            const count = counts[pid] || 0;
+            const segmentWidth = (count / totalParticles) * barWidth;
 
-        // Draw P2 portion
-        ctx.fillStyle = LIQUID_WAR_CONFIG.colors.teams[1];
-        ctx.fillRect(barPadding + p1Width, barY, barWidth - p1Width, barHeight);
+            ctx.fillStyle = colors[(i - 1) % colors.length];
+            ctx.fillRect(currentX, barY, segmentWidth, barHeight);
+            currentX += segmentWidth;
+        }
 
-        // Draw counts text
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 14px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`${counts.p1} (${p1Percent}%)`, barPadding + 5, barY + 15);
-        ctx.textAlign = 'right';
-        ctx.fillText(`(${p2Percent}%) ${counts.p2}`, width - barPadding - 5, barY + 15);
+        // Draw player names and counts below the bar
+        const names = state.playerNames || {};
+        const nameY = barY + barHeight + 15;
+        const nameSpacing = width / totalPlayers;
 
-        // Draw player names
-        const names = state.playerNames || { p1: 'Player 1', p2: 'Player 2' };
-        ctx.font = '12px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillStyle = LIQUID_WAR_CONFIG.colors.teams[0];
-        ctx.fillText(names.p1 + (playerNumber === 1 ? ' (You)' : ''), barPadding, barY + barHeight + 15);
-        ctx.textAlign = 'right';
-        ctx.fillStyle = LIQUID_WAR_CONFIG.colors.teams[1];
-        ctx.fillText((playerNumber === 2 ? '(You) ' : '') + names.p2, width - barPadding, barY + barHeight + 15);
+        ctx.font = '11px monospace';
+        for (let i = 1; i <= totalPlayers; i++) {
+            const pid = `p${i}`;
+            const count = counts[pid] || 0;
+            const percent = Math.round((count / totalParticles) * 100);
+            const name = names[pid] || `Player ${i}`;
+            const isYou = i === playerNumber;
+            const isAI = state.aiPlayers?.[pid];
+
+            ctx.fillStyle = colors[(i - 1) % colors.length];
+            ctx.textAlign = 'center';
+
+            const displayName = isYou ? `${name} (You)` : name;
+            const x = barPadding + nameSpacing * (i - 0.5);
+
+            ctx.fillText(`${displayName}`, x, nameY);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(`${count} (${percent}%)`, x, nameY + 12);
+        }
 
         // Draw phase-specific overlays
         if (state.phase === 'countdown') {
@@ -367,6 +388,7 @@ export class LiquidWarRenderer {
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
+        const colors = LIQUID_WAR_CONFIG.colors.teams;
 
         // Draw dark overlay
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -379,7 +401,7 @@ export class LiquidWarRenderer {
         if (state.winner === 'tie') {
             winnerText = 'TIE!';
         } else if (state.winner) {
-            const winnerNumber = state.winner === 'p1' ? 1 : 2;
+            const winnerNumber = parseInt(state.winner.slice(1));
             const winnerName = state.playerNames?.[state.winner] || `Player ${winnerNumber}`;
 
             if (winnerNumber === playerNumber) {
@@ -388,7 +410,7 @@ export class LiquidWarRenderer {
                 winnerText = `${winnerName} WINS!`;
             }
 
-            winnerColor = LIQUID_WAR_CONFIG.colors.teams[winnerNumber - 1];
+            winnerColor = colors[(winnerNumber - 1) % colors.length];
         }
 
         // Draw winner text
@@ -396,20 +418,46 @@ export class LiquidWarRenderer {
         ctx.font = 'bold 36px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(winnerText, width / 2, height / 2 - 20);
+        ctx.fillText(winnerText, width / 2, height / 2 - 30);
 
-        // Draw final counts
-        const counts = state.particleCounts || { p1: 0, p2: 0 };
-        ctx.font = '20px monospace';
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(`${counts.p1} - ${counts.p2}`, width / 2, height / 2 + 20);
+        // Draw final standings
+        const totalPlayers = state.playerCount || 2;
+        const counts = state.particleCounts || {};
+        const names = state.playerNames || {};
+
+        // Build sorted standings
+        const standings = [];
+        for (let i = 1; i <= totalPlayers; i++) {
+            const pid = `p${i}`;
+            standings.push({
+                pid,
+                name: names[pid] || `Player ${i}`,
+                count: counts[pid] || 0,
+                color: colors[(i - 1) % colors.length],
+            });
+        }
+        standings.sort((a, b) => b.count - a.count);
+
+        // Draw standings
+        ctx.font = '14px monospace';
+        const standingsY = height / 2 + 10;
+        standings.forEach((entry, index) => {
+            const y = standingsY + index * 18;
+            ctx.fillStyle = entry.color;
+            ctx.textAlign = 'right';
+            ctx.fillText(`${index + 1}.`, width / 2 - 60, y);
+            ctx.textAlign = 'left';
+            ctx.fillText(`${entry.name}: ${entry.count}`, width / 2 - 50, y);
+        });
 
         // Draw forfeit notice if applicable
         if (state.forfeitBy) {
-            const forfeitName = state.playerNames?.[state.forfeitBy] || `Player ${state.forfeitBy === 'p1' ? 1 : 2}`;
+            const forfeitNumber = parseInt(state.forfeitBy.slice(1));
+            const forfeitName = state.playerNames?.[state.forfeitBy] || `Player ${forfeitNumber}`;
             ctx.font = '14px monospace';
             ctx.fillStyle = '#888888';
-            ctx.fillText(`${forfeitName} forfeited`, width / 2, height / 2 + 50);
+            ctx.textAlign = 'center';
+            ctx.fillText(`${forfeitName} forfeited`, width / 2, standingsY + totalPlayers * 18 + 10);
         }
 
         ctx.textBaseline = 'alphabetic';

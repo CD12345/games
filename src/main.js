@@ -1105,9 +1105,17 @@ function updatePlayerList(players) {
     // Update start button
     if (isHost) {
         const minPlayers = game?.minPlayers || 2;
+        const supportsAI = game?.supportsAI === true;
+        const targetPlayerCount = parseInt(currentSettings?.playerCount) || minPlayers;
+        const aiSlots = Math.max(0, targetPlayerCount - connectedCount);
+
         if (connectedCount >= minPlayers) {
             elements.btnStartGame.disabled = false;
-            elements.btnStartGame.textContent = 'Start Game';
+            if (supportsAI && aiSlots > 0) {
+                elements.btnStartGame.textContent = `Start Game (${aiSlots} AI)`;
+            } else {
+                elements.btnStartGame.textContent = 'Start Game';
+            }
         } else {
             elements.btnStartGame.disabled = true;
             elements.btnStartGame.textContent = `Waiting for players (${connectedCount}/${minPlayers})...`;

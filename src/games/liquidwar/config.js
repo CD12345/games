@@ -3,13 +3,13 @@
 export const LIQUID_WAR_CONFIG = {
     // Grid settings
     grid: {
-        width: 200,              // Logical grid width (4x density)
-        height: 200,             // Logical grid height (square for simplicity)
+        width: 100,              // Logical grid width
+        height: 100,             // Logical grid height (square for simplicity)
     },
 
     // Particle settings
     particle: {
-        initialCount: 3200,      // Particles per player at start (4x density)
+        initialCount: 1600,      // Particles per player at start
         maxHealth: 100,          // Maximum health per particle
         attackDamage: 8,         // Damage dealt per tick when attacking
         healAmount: 3,           // Health restored per tick when near ally
@@ -687,25 +687,42 @@ export function getStartPositions(width, height, teamCount) {
     }));
 }
 
-// Get initial game state
-export function getInitialState() {
+// Get initial game state for N players
+export function getInitialState(playerCount = 2) {
+    const count = Math.max(2, Math.min(6, playerCount));
+    const margin = 0.1;
+
+    // Starting positions for up to 6 players
+    const startPositions = [
+        { x: margin, y: margin },           // Top-left (P1)
+        { x: 1 - margin, y: 1 - margin },   // Bottom-right (P2)
+        { x: 1 - margin, y: margin },       // Top-right (P3)
+        { x: margin, y: 1 - margin },       // Bottom-left (P4)
+        { x: 0.5, y: margin },              // Top-center (P5)
+        { x: 0.5, y: 1 - margin },          // Bottom-center (P6)
+    ];
+
+    const cursors = {};
+    const particleCounts = {};
+    const playerNames = {};
+
+    for (let i = 0; i < count; i++) {
+        const id = `p${i + 1}`;
+        cursors[id] = { x: startPositions[i].x, y: startPositions[i].y };
+        particleCounts[id] = 0;
+        playerNames[id] = `Player ${i + 1}`;
+    }
+
     return {
         phase: 'countdown',  // 'countdown', 'playing', 'gameover'
         startTime: Date.now(),
         winner: null,
         mapId: 'arena',
-        cursors: {
-            p1: { x: 0.15, y: 0.15 },
-            p2: { x: 0.85, y: 0.85 },
-        },
-        particleCounts: {
-            p1: 0,
-            p2: 0,
-        },
-        playerNames: {
-            p1: 'Player 1',
-            p2: 'Player 2',
-        },
+        playerCount: count,
+        cursors,
+        particleCounts,
+        playerNames,
+        aiPlayers: {},  // { p2: true, p3: true, ... } - which players are AI
     };
 }
 
