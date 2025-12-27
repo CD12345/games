@@ -39,11 +39,15 @@ function generateMapPreview(mapName, size = 128) {
 GameRegistry.register('liquidwar', {
     name: 'Liquid War',
     description: 'Control your cursor to lead your army! Particles follow the shortest path to your cursor.',
-    minPlayers: 2,
-    maxPlayers: 2,
+    minPlayers: 1,  // Can start with just host, AI fills remaining slots
+    maxPlayers: 6,
     icon: '💧',
     gameClass: LiquidWarGame,
-    getInitialState,
+    getInitialState: (settings) => {
+        const playerCount = parseInt(settings?.playerCount) || 2;
+        return getInitialState(playerCount);
+    },
+    supportsAI: true,  // Flag indicating this game can fill empty slots with AI
     getPreview: (settingId, currentSettings) => {
         if (settingId === 'mapPreview') {
             const mapName = currentSettings.mapId || 'Arena';
@@ -52,6 +56,20 @@ GameRegistry.register('liquidwar', {
         return null;
     },
     settings: [
+        {
+            id: 'playerCount',
+            label: 'Players',
+            type: 'enum',
+            options: ['2', '3', '4', '5', '6'],
+            default: '2',
+        },
+        {
+            id: 'aiDifficulty',
+            label: 'AI Difficulty',
+            type: 'enum',
+            options: ['Easy', 'Medium', 'Hard'],
+            default: 'Medium',
+        },
         {
             id: 'mapId',
             label: 'Map',

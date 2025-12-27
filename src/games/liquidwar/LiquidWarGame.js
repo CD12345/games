@@ -15,6 +15,7 @@ import {
     getInitialState,
     getMapIdFromSetting,
 } from './config.js';
+import { GradientWorkerPool, supportsWorkers } from './GradientWorkerPool.js';
 
 // Direction offsets for 8-directional movement
 const DIRECTIONS = [
@@ -51,12 +52,17 @@ export class LiquidWarGame extends GameEngine {
         this.gameCode = gameCode;
         this.isHost = isHost;
         this.playerNumber = playerNumber;
-        this.playerId = playerNumber === 1 ? 'p1' : 'p2';
-        this.opponentId = playerNumber === 1 ? 'p2' : 'p1';
+        this.playerId = `p${playerNumber}`;
         this.settings = settings;
 
+        // Player count and AI settings
+        this.totalPlayers = parseInt(settings.playerCount) || 2;
+        this.aiDifficulty = settings.aiDifficulty || 'Medium';
+        this.humanPlayers = new Set([this.playerId]); // Will be updated as players join
+        this.aiPlayers = new Set(); // Players controlled by AI
+
         // Game state
-        this.state = getInitialState();
+        this.state = getInitialState(this.totalPlayers);
         this.localName = normalizeName(getCookie('playerName')) || `Player ${this.playerNumber}`;
 
         // Grid and particles (only fully maintained on host)
@@ -65,7 +71,7 @@ export class LiquidWarGame extends GameEngine {
         this.walls = null;           // 2D array: 1 = wall, 0 = floor
         this.particles = [];         // Array of { x, y, team, health }
         this.particleGrid = null;    // 2D array for quick lookup
-        this.gradients = {};         // { p1: 2D array, p2: 2D array }
+        this.gradients = {};         // Gradient for each player
 
         // Components
         this.input = new InputManager(canvas, { mode: 'cursor' });
@@ -76,6 +82,21 @@ export class LiquidWarGame extends GameEngine {
         this.tickAccumulator = 0;
         this.tickInterval = 1000 / LIQUID_WAR_CONFIG.game.tickRate;
         this.lastInputSync = 0;
+        this.lastAIUpdate = 0;
+
+        // AI state for each AI player
+        this.aiState = {};
+
+        // Pre-allocated buffers for performance (fallback when workers unavailable)
+        this.gradientBuffer = null;
+        this.visitedBuffer = null;
+        this.queueBuffer = null;
+        this.lastCursorPositions = {};
+
+        // Web Worker pool for parallel gradient computation
+        this.workerPool = null;
+        this.useWorkers = supportsWorkers();
+        this.pendingGradients = null;  // Promise for async gradient computation
 
         // Game over handling
         this.onGameOver = null;
@@ -84,19 +105,49 @@ export class LiquidWarGame extends GameEngine {
     }
 
     async initialize() {
-        debugLog(`LiquidWar init: ${this.isHost ? 'host' : 'guest'}, player ${this.playerNumber}`);
+        debugLog(`LiquidWar init: ${this.isHost ? 'host' : 'guest'}, player ${this.playerNumber}, ${this.totalPlayers} total`);
 
         // Initialize the map
         const mapSetting = this.settings.mapId || 'Arena';
         const mapId = getMapIdFromSetting(mapSetting);
         this.state.mapId = mapId;
+        this.state.playerCount = this.totalPlayers;
         this.initializeMap(mapId);
+
+        // Determine which players are human vs AI
+        // Currently: p1 = host, p2 = guest (if connected), rest are AI
+        this.humanPlayers = new Set(['p1']);
+        if (this.totalPlayers >= 2) {
+            this.humanPlayers.add('p2'); // Guest player
+        }
+
+        // All other players are AI
+        this.aiPlayers = new Set();
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            if (!this.humanPlayers.has(pid)) {
+                this.aiPlayers.add(pid);
+                this.state.aiPlayers[pid] = true;
+                this.state.playerNames[pid] = `AI ${i} (${this.aiDifficulty})`;
+                // Initialize AI state
+                this.aiState[pid] = {
+                    targetX: this.state.cursors[pid].x,
+                    targetY: this.state.cursors[pid].y,
+                    lastDecision: 0,
+                    mode: 'attack', // 'attack', 'defend', 'expand'
+                };
+            }
+        }
+
+        debugLog(`Human players: ${[...this.humanPlayers].join(', ')}`);
+        debugLog(`AI players: ${[...this.aiPlayers].join(', ')}`);
 
         // Set up network callbacks
         if (this.isHost) {
             this.network.onInputUpdate = (input) => {
+                // Guest sends their cursor position (p2)
                 if (input?.cursorX !== undefined && input?.cursorY !== undefined) {
-                    this.state.cursors[this.opponentId] = {
+                    this.state.cursors.p2 = {
                         x: input.cursorX,
                         y: input.cursorY,
                     };
@@ -115,9 +166,6 @@ export class LiquidWarGame extends GameEngine {
         }
 
         // Name exchange
-        if (!this.state.playerNames) {
-            this.state.playerNames = { p1: 'Player 1', p2: 'Player 2' };
-        }
         this.state.playerNames[this.playerId] = this.localName;
 
         onMessage('player_name', (data) => {
@@ -157,6 +205,20 @@ export class LiquidWarGame extends GameEngine {
         // Set up renderer with map
         this.renderer.setMap(this.walls, this.gridWidth, this.gridHeight);
 
+        // Initialize Web Worker pool for gradient computation (host only)
+        if (this.isHost && this.useWorkers) {
+            try {
+                // Use 2 workers - good balance for mobile and desktop
+                this.workerPool = new GradientWorkerPool(2);
+                await this.workerPool.initialize(this.walls, this.gridWidth, this.gridHeight);
+                debugLog('Gradient workers initialized (2 workers)');
+            } catch (e) {
+                debugLog('Workers failed, using fallback: ' + e.message);
+                this.useWorkers = false;
+                this.workerPool = null;
+            }
+        }
+
         // Initialize particles (host only)
         if (this.isHost) {
             this.initializeParticles();
@@ -180,25 +242,41 @@ export class LiquidWarGame extends GameEngine {
             }
             this.particleGrid.push(row);
         }
+
+        // Pre-allocate buffers for BFS (huge performance gain)
+        const gridSize = this.gridWidth * this.gridHeight;
+        this.visitedBuffer = new Uint8Array(gridSize);
+        this.queueBuffer = new Uint32Array(gridSize * 2); // x,y pairs
+
+        // Pre-allocate gradient arrays for each player (reused each tick)
+        this.gradientArrays = {};
+        for (let i = 1; i <= 6; i++) {
+            this.gradientArrays[`p${i}`] = new Float32Array(gridSize);
+        }
     }
 
     initializeParticles() {
         const config = LIQUID_WAR_CONFIG.particle;
-        const startPositions = getStartPositions(this.gridWidth, this.gridHeight, 2);
+        const startPositions = getStartPositions(this.gridWidth, this.gridHeight, this.totalPlayers);
+
+        // Adjust particle count per player based on total players
+        // More players = fewer particles each to keep total reasonable
+        const particlesPerPlayer = Math.floor(config.initialCount / Math.max(1, this.totalPlayers / 2));
 
         this.particles = [];
 
         // Place particles for each team
-        ['p1', 'p2'].forEach((team, teamIndex) => {
-            const start = startPositions[teamIndex];
+        for (let i = 0; i < this.totalPlayers; i++) {
+            const team = `p${i + 1}`;
+            const start = startPositions[i];
             const placed = this.placeParticlesNear(
                 start.x,
                 start.y,
                 team,
-                config.initialCount
+                particlesPerPlayer
             );
             debugLog(`Team ${team}: placed ${placed} particles near (${start.x}, ${start.y})`);
-        });
+        }
 
         // Update particle grid
         this.rebuildParticleGrid();
@@ -281,88 +359,102 @@ export class LiquidWarGame extends GameEngine {
         }
     }
 
-    // Calculate gradient (distance field) from cursor to all walkable cells
+    // Optimized gradient calculation using typed arrays
+    // Returns a flat Float32Array (access as gradient[y * width + x])
     calculateGradient(team) {
         const cursor = this.state.cursors[team];
-        // Clamp cursor to grid bounds for gradient calculation
-        // (cursor can be in margin area for pulling effect, but gradient uses edge)
+        const w = this.gridWidth;
+        const h = this.gridHeight;
+
+        // Clamp cursor to grid bounds
         const clampedX = Math.max(0, Math.min(0.999, cursor.x));
         const clampedY = Math.max(0, Math.min(0.999, cursor.y));
-        const cursorX = Math.max(0, Math.min(this.gridWidth - 1, Math.floor(clampedX * this.gridWidth)));
-        const cursorY = Math.max(0, Math.min(this.gridHeight - 1, Math.floor(clampedY * this.gridHeight)));
+        const cursorX = Math.max(0, Math.min(w - 1, Math.floor(clampedX * w)));
+        const cursorY = Math.max(0, Math.min(h - 1, Math.floor(clampedY * h)));
 
-        // Initialize gradient with Infinity
-        const gradient = [];
-        for (let y = 0; y < this.gridHeight; y++) {
-            const row = [];
-            for (let x = 0; x < this.gridWidth; x++) {
-                row.push(Infinity);
-            }
-            gradient.push(row);
-        }
+        // Reuse pre-allocated arrays
+        const gradient = this.gradientArrays[team];
+        const visited = this.visitedBuffer;
+        const queue = this.queueBuffer;
 
-        // BFS from cursor position
-        const queue = [];
+        // Reset arrays (faster than creating new ones)
+        gradient.fill(65535); // Use large number instead of Infinity for typed array
+        visited.fill(0);
 
-        // Find nearest walkable cell to cursor
-        if (this.isWalkable(cursorX, cursorY)) {
-            gradient[cursorY][cursorX] = 0;
-            queue.push({ x: cursorX, y: cursorY, dist: 0 });
-        } else {
-            // Search for nearest walkable cell
-            const searched = new Set();
-            const searchQueue = [{ x: cursorX, y: cursorY }];
-            searched.add(`${cursorX},${cursorY}`);
+        let qHead = 0;  // Queue read position
+        let qTail = 0;  // Queue write position
 
+        // Find starting cell
+        let startX = cursorX;
+        let startY = cursorY;
+
+        if (this.walls[cursorY][cursorX] === 1) {
+            // Cursor is in wall, find nearest walkable cell using simple spiral
             let found = false;
-            while (searchQueue.length > 0 && !found) {
-                const pos = searchQueue.shift();
-
-                for (const dir of DIRECTIONS) {
-                    const nx = pos.x + dir.dx;
-                    const ny = pos.y + dir.dy;
-                    const key = `${nx},${ny}`;
-
-                    if (!searched.has(key) && this.inBounds(nx, ny)) {
-                        searched.add(key);
-                        if (this.isWalkable(nx, ny)) {
-                            gradient[ny][nx] = 0;
-                            queue.push({ x: nx, y: ny, dist: 0 });
+            for (let r = 1; r < Math.max(w, h) && !found; r++) {
+                for (let dy = -r; dy <= r && !found; dy++) {
+                    for (let dx = -r; dx <= r && !found; dx++) {
+                        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                        const nx = cursorX + dx;
+                        const ny = cursorY + dy;
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && this.walls[ny][nx] === 0) {
+                            startX = nx;
+                            startY = ny;
                             found = true;
-                            break;
                         }
-                        searchQueue.push({ x: nx, y: ny });
                     }
                 }
             }
         }
 
-        // Flood fill to calculate distances
-        const visited = new Set();
-        for (const q of queue) {
-            visited.add(`${q.x},${q.y}`);
-        }
+        // Initialize BFS from start
+        const startIdx = startY * w + startX;
+        gradient[startIdx] = 0;
+        visited[startIdx] = 1;
+        queue[qTail++] = startX;
+        queue[qTail++] = startY;
 
-        while (queue.length > 0) {
-            const { x, y, dist } = queue.shift();
+        // Pre-computed direction offsets (dx, dy, cost*1000 for integer math)
+        const dirs = [
+            0, -1, 1000,   // N
+            1, -1, 1414,   // NE
+            1, 0, 1000,    // E
+            1, 1, 1414,    // SE
+            0, 1, 1000,    // S
+            -1, 1, 1414,   // SW
+            -1, 0, 1000,   // W
+            -1, -1, 1414   // NW
+        ];
 
-            for (const dir of DIRECTIONS) {
-                const nx = x + dir.dx;
-                const ny = y + dir.dy;
-                const key = `${nx},${ny}`;
+        // BFS flood fill
+        while (qHead < qTail) {
+            const x = queue[qHead++];
+            const y = queue[qHead++];
+            const idx = y * w + x;
+            const dist = gradient[idx];
 
-                if (!visited.has(key) && this.isWalkable(nx, ny)) {
-                    visited.add(key);
-                    // Diagonal moves cost sqrt(2), cardinal moves cost 1
-                    const moveCost = (dir.dx !== 0 && dir.dy !== 0) ? 1.414 : 1;
-                    const newDist = dist + moveCost;
-                    gradient[ny][nx] = newDist;
-                    queue.push({ x: nx, y: ny, dist: newDist });
-                }
+            for (let d = 0; d < 24; d += 3) {
+                const nx = x + dirs[d];
+                const ny = y + dirs[d + 1];
+
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+
+                const nIdx = ny * w + nx;
+                if (visited[nIdx] || this.walls[ny][nx] === 1) continue;
+
+                visited[nIdx] = 1;
+                gradient[nIdx] = dist + dirs[d + 2] / 1000;
+                queue[qTail++] = nx;
+                queue[qTail++] = ny;
             }
         }
 
         return gradient;
+    }
+
+    // Helper to get gradient value (handles flat array)
+    getGradientValue(gradient, x, y) {
+        return gradient[y * this.gridWidth + x];
     }
 
     update(deltaTime) {
@@ -459,6 +551,280 @@ export class LiquidWarGame extends GameEngine {
         });
     }
 
+    // AI cursor control - runs on host for all AI players
+    updateAICursors() {
+        if (!this.isHost) return;
+
+        const now = Date.now();
+
+        // AI update frequency based on difficulty
+        const updateIntervals = {
+            'Easy': 500,    // Update every 500ms
+            'Medium': 200,  // Update every 200ms
+            'Hard': 80,     // Update every 80ms
+        };
+        const interval = updateIntervals[this.aiDifficulty] || 200;
+
+        if (now - this.lastAIUpdate < interval) return;
+        this.lastAIUpdate = now;
+
+        for (const aiId of this.aiPlayers) {
+            this.updateSingleAI(aiId);
+        }
+    }
+
+    updateSingleAI(aiId) {
+        const cursor = this.state.cursors[aiId];
+        const aiState = this.aiState[aiId];
+        if (!cursor || !aiState) return;
+
+        const now = Date.now();
+
+        // Decision-making frequency based on difficulty
+        const decisionIntervals = {
+            'Easy': 2000,   // New decision every 2s
+            'Medium': 800,  // New decision every 800ms
+            'Hard': 300,    // New decision every 300ms
+        };
+        const decisionInterval = decisionIntervals[this.aiDifficulty] || 800;
+
+        // Make new strategic decision periodically
+        if (now - aiState.lastDecision > decisionInterval) {
+            aiState.lastDecision = now;
+            this.makeAIDecision(aiId, aiState);
+        }
+
+        // Move cursor toward target
+        const speed = this.getAICursorSpeed();
+        const dx = aiState.targetX - cursor.x;
+        const dy = aiState.targetY - cursor.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 0.01) {
+            const moveSpeed = Math.min(speed, dist);
+            cursor.x += (dx / dist) * moveSpeed;
+            cursor.y += (dy / dist) * moveSpeed;
+
+            // Clamp to valid range
+            const margin = LIQUID_WAR_CONFIG.display?.mapMargin || 0.1;
+            cursor.x = Math.max(-margin, Math.min(1 + margin, cursor.x));
+            cursor.y = Math.max(-margin, Math.min(1 + margin, cursor.y));
+        }
+    }
+
+    getAICursorSpeed() {
+        const speeds = {
+            'Easy': 0.015,
+            'Medium': 0.025,
+            'Hard': 0.04,
+        };
+        return speeds[this.aiDifficulty] || 0.025;
+    }
+
+    makeAIDecision(aiId, aiState) {
+        // Calculate centers of mass for all teams
+        const teamCenters = this.calculateTeamCenters();
+        const myCenter = teamCenters[aiId];
+        const myCount = this.state.particleCounts[aiId] || 0;
+
+        if (!myCenter || myCount === 0) {
+            // No particles left, wander randomly
+            aiState.targetX = 0.2 + Math.random() * 0.6;
+            aiState.targetY = 0.2 + Math.random() * 0.6;
+            return;
+        }
+
+        // Find enemies and their strengths
+        const enemies = [];
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            if (pid !== aiId && teamCenters[pid]) {
+                enemies.push({
+                    id: pid,
+                    center: teamCenters[pid],
+                    count: this.state.particleCounts[pid] || 0,
+                });
+            }
+        }
+
+        if (enemies.length === 0) {
+            // No enemies, just hold position
+            aiState.targetX = myCenter.x;
+            aiState.targetY = myCenter.y;
+            return;
+        }
+
+        // AI Strategy based on difficulty
+        let targetX, targetY;
+
+        if (this.aiDifficulty === 'Easy') {
+            // Easy: Random wandering with occasional targeting
+            if (Math.random() < 0.3) {
+                // 30% chance to target an enemy
+                const randomEnemy = enemies[Math.floor(Math.random() * enemies.length)];
+                targetX = randomEnemy.center.x;
+                targetY = randomEnemy.center.y;
+            } else {
+                // Wander near own particles
+                targetX = myCenter.x + (Math.random() - 0.5) * 0.4;
+                targetY = myCenter.y + (Math.random() - 0.5) * 0.4;
+            }
+        } else if (this.aiDifficulty === 'Medium') {
+            // Medium: Target weakest enemy or expand
+            const weakestEnemy = enemies.reduce((a, b) => a.count < b.count ? a : b);
+
+            if (myCount > weakestEnemy.count * 1.2) {
+                // We're stronger, attack!
+                targetX = weakestEnemy.center.x;
+                targetY = weakestEnemy.center.y;
+            } else {
+                // Defend/expand - stay between own center and nearest enemy
+                const nearestEnemy = this.findNearestEnemy(myCenter, enemies);
+                targetX = (myCenter.x + nearestEnemy.center.x) / 2;
+                targetY = (myCenter.y + nearestEnemy.center.y) / 2;
+            }
+        } else {
+            // Hard: Optimal targeting with flanking
+            const weakestEnemy = enemies.reduce((a, b) => a.count < b.count ? a : b);
+            const nearestEnemy = this.findNearestEnemy(myCenter, enemies);
+
+            // Calculate flank position (attack from the side)
+            const enemyToMe = {
+                x: myCenter.x - nearestEnemy.center.x,
+                y: myCenter.y - nearestEnemy.center.y,
+            };
+            const dist = Math.sqrt(enemyToMe.x * enemyToMe.x + enemyToMe.y * enemyToMe.y);
+
+            if (dist > 0) {
+                // Normalize and rotate 45 degrees for flanking
+                const nx = enemyToMe.x / dist;
+                const ny = enemyToMe.y / dist;
+
+                // Rotate direction for flanking maneuver
+                const angle = Math.PI / 4 * (Math.random() < 0.5 ? 1 : -1);
+                const rx = nx * Math.cos(angle) - ny * Math.sin(angle);
+                const ry = nx * Math.sin(angle) + ny * Math.cos(angle);
+
+                // Target behind/beside the enemy
+                if (myCount > weakestEnemy.count) {
+                    // Attack with flanking
+                    targetX = weakestEnemy.center.x - rx * 0.1;
+                    targetY = weakestEnemy.center.y - ry * 0.1;
+                } else {
+                    // Defensive positioning
+                    targetX = myCenter.x + rx * 0.15;
+                    targetY = myCenter.y + ry * 0.15;
+                }
+            } else {
+                targetX = nearestEnemy.center.x;
+                targetY = nearestEnemy.center.y;
+            }
+
+            // Hard AI also considers unclaimed territory
+            if (Math.random() < 0.2) {
+                const emptySpot = this.findEmptyTerritory();
+                if (emptySpot && myCount > 500) {
+                    targetX = emptySpot.x;
+                    targetY = emptySpot.y;
+                }
+            }
+        }
+
+        // Clamp target to valid range
+        aiState.targetX = Math.max(0.05, Math.min(0.95, targetX));
+        aiState.targetY = Math.max(0.05, Math.min(0.95, targetY));
+    }
+
+    calculateTeamCenters() {
+        const sums = {};
+        const counts = {};
+
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            sums[pid] = { x: 0, y: 0 };
+            counts[pid] = 0;
+        }
+
+        for (const particle of this.particles) {
+            if (sums[particle.team]) {
+                sums[particle.team].x += particle.x;
+                sums[particle.team].y += particle.y;
+                counts[particle.team]++;
+            }
+        }
+
+        const centers = {};
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            if (counts[pid] > 0) {
+                centers[pid] = {
+                    x: (sums[pid].x / counts[pid]) / this.gridWidth,
+                    y: (sums[pid].y / counts[pid]) / this.gridHeight,
+                };
+            }
+        }
+
+        return centers;
+    }
+
+    findNearestEnemy(myCenter, enemies) {
+        let nearest = enemies[0];
+        let minDist = Infinity;
+
+        for (const enemy of enemies) {
+            const dx = enemy.center.x - myCenter.x;
+            const dy = enemy.center.y - myCenter.y;
+            const dist = dx * dx + dy * dy;
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = enemy;
+            }
+        }
+
+        return nearest;
+    }
+
+    findEmptyTerritory() {
+        // Optimized: sample random positions and use grid-based check
+        // instead of iterating all particles
+        const w = this.gridWidth;
+        const h = this.gridHeight;
+        let bestSpot = null;
+        let bestMinDist = 0;
+
+        for (let i = 0; i < 5; i++) {
+            const x = 0.1 + Math.random() * 0.8;
+            const y = 0.1 + Math.random() * 0.8;
+            const gx = Math.floor(x * w);
+            const gy = Math.floor(y * h);
+
+            if (this.walls[gy][gx] === 1) continue;
+
+            // Check a small neighborhood instead of all particles
+            let minDist = 100; // Large default
+            const checkRadius = 15;
+
+            for (let dy = -checkRadius; dy <= checkRadius; dy += 3) {
+                for (let dx = -checkRadius; dx <= checkRadius; dx += 3) {
+                    const nx = gx + dx;
+                    const ny = gy + dy;
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                    if (this.particleGrid[ny][nx]) {
+                        const dist = dx * dx + dy * dy;
+                        if (dist < minDist) minDist = dist;
+                    }
+                }
+            }
+
+            if (minDist > bestMinDist) {
+                bestMinDist = minDist;
+                bestSpot = { x, y };
+            }
+        }
+
+        return bestSpot;
+    }
+
     // Main game logic tick (host only)
     tick() {
         if (this.state.phase === 'countdown') {
@@ -480,33 +846,85 @@ export class LiquidWarGame extends GameEngine {
             return;
         }
 
-        // Recalculate gradients
-        this.gradients.p1 = this.calculateGradient('p1');
-        this.gradients.p2 = this.calculateGradient('p2');
+        // Update AI cursors
+        this.updateAICursors();
 
-        // Move particles and handle combat
-        this.moveParticles();
-        this.handleCombat();
+        // Compute gradients (async with workers, or sync fallback)
+        this.computeGradients();
 
-        // Update particle counts
-        this.updateParticleCounts();
+        // Only process if we have gradients (workers may still be computing)
+        if (Object.keys(this.gradients).length > 0) {
+            // Move particles and handle combat
+            this.moveParticles();
+            this.handleCombat();
 
-        // Check for winner
-        if (this.state.particleCounts.p1 === 0 || this.state.particleCounts.p2 === 0) {
-            this.endGame();
+            // Update particle counts
+            this.updateParticleCounts();
+
+            // Check for winner - game ends when only one team has particles
+            const teamsWithParticles = this.getTeamsWithParticles();
+            if (teamsWithParticles.length <= 1) {
+                this.endGame();
+            }
         }
     }
 
-    moveParticles() {
-        // Shuffle particles to prevent bias
-        const shuffled = [...this.particles];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
+    // Compute gradients - uses workers if available, otherwise sync
+    computeGradients() {
+        if (this.workerPool && this.useWorkers) {
+            // Async path: kick off computation, results used next tick
+            if (!this.pendingGradients) {
+                // Build cursor positions for active players only
+                const cursors = {};
+                for (let i = 1; i <= this.totalPlayers; i++) {
+                    const pid = `p${i}`;
+                    if (this.state.cursors[pid]) {
+                        cursors[pid] = this.state.cursors[pid];
+                    }
+                }
 
-        for (const particle of shuffled) {
-            this.moveParticle(particle);
+                this.pendingGradients = this.workerPool.computeAllGradients(cursors)
+                    .then(gradients => {
+                        this.gradients = gradients;
+                        this.pendingGradients = null;
+                    })
+                    .catch(e => {
+                        debugLog('Worker error: ' + e.message);
+                        this.pendingGradients = null;
+                    });
+            }
+        } else {
+            // Sync fallback: compute all gradients immediately
+            for (let i = 1; i <= this.totalPlayers; i++) {
+                const pid = `p${i}`;
+                this.gradients[pid] = this.calculateGradient(pid);
+            }
+        }
+    }
+
+    getTeamsWithParticles() {
+        const teams = new Set();
+        for (const particle of this.particles) {
+            teams.add(particle.team);
+        }
+        return [...teams];
+    }
+
+    moveParticles() {
+        // Instead of shuffling (expensive), iterate with random start and prime stride
+        // This gives fair distribution without the O(n) shuffle cost
+        const particles = this.particles;
+        const len = particles.length;
+        if (len === 0) return;
+
+        const start = (Math.random() * len) | 0;
+        // Use a prime stride to hit all elements in different order each tick
+        const primes = [7, 11, 13, 17, 19, 23, 29, 31];
+        const stride = primes[(Math.random() * primes.length) | 0];
+
+        for (let i = 0; i < len; i++) {
+            const idx = (start + i * stride) % len;
+            this.moveParticle(particles[idx]);
         }
     }
 
@@ -514,52 +932,55 @@ export class LiquidWarGame extends GameEngine {
         const gradient = this.gradients[particle.team];
         if (!gradient) return;
 
-        const currentGrad = gradient[particle.y][particle.x];
-        if (currentGrad === Infinity) return;  // Unreachable
+        const w = this.gridWidth;
+        const currentGrad = gradient[particle.y * w + particle.x];
+        if (currentGrad >= 65535) return;  // Unreachable
 
         // Find best adjacent cell (lowest gradient value)
-        let bestDir = null;
+        let bestDx = 0, bestDy = 0;
         let bestGrad = currentGrad;
+        let hasBest = false;
 
-        // Shuffle directions for randomness when equal
-        const dirs = [...DIRECTIONS];
-        for (let i = dirs.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
-        }
+        // Random starting direction for fairness
+        const startDir = (Math.random() * 8) | 0;
 
-        for (const dir of dirs) {
+        for (let i = 0; i < 8; i++) {
+            const d = (startDir + i) % 8;
+            const dir = DIRECTIONS[d];
             const nx = particle.x + dir.dx;
             const ny = particle.y + dir.dy;
 
-            if (!this.isWalkable(nx, ny)) continue;
+            // Inline bounds and walkable check
+            if (nx < 0 || nx >= w || ny < 0 || ny >= this.gridHeight) continue;
+            if (this.walls[ny][nx] === 1) continue;
 
-            const neighborGrad = gradient[ny][nx];
+            const neighborGrad = gradient[ny * w + nx];
 
             // Only move if it gets us closer
             if (neighborGrad < bestGrad) {
-                const occupant = this.getParticleAt(nx, ny);
+                const occupant = this.particleGrid[ny][nx];
                 // Can move if cell is empty or occupied by enemy (will attack)
                 if (!occupant || occupant.team !== particle.team) {
-                    bestDir = dir;
+                    bestDx = dir.dx;
+                    bestDy = dir.dy;
                     bestGrad = neighborGrad;
+                    hasBest = true;
                 }
             }
         }
 
         // Move if we found a better cell
-        if (bestDir) {
-            const newX = particle.x + bestDir.dx;
-            const newY = particle.y + bestDir.dy;
-
-            const occupant = this.getParticleAt(newX, newY);
+        if (hasBest) {
+            const newX = particle.x + bestDx;
+            const newY = particle.y + bestDy;
+            const occupant = this.particleGrid[newY][newX];
 
             if (!occupant) {
                 // Move to empty cell
-                this.setParticleAt(particle.x, particle.y, null);
+                this.particleGrid[particle.y][particle.x] = null;
                 particle.x = newX;
                 particle.y = newY;
-                this.setParticleAt(newX, newY, particle);
+                this.particleGrid[newY][newX] = particle;
             }
             // If occupied by enemy, combat will be handled in handleCombat()
         }
@@ -567,91 +988,128 @@ export class LiquidWarGame extends GameEngine {
 
     handleCombat() {
         const config = LIQUID_WAR_CONFIG.particle;
-        const deadParticles = [];
+        const w = this.gridWidth;
+        const h = this.gridHeight;
+        const attackDamage = config.attackDamage;
+        const healAmount = config.healAmount;
+        const maxHealth = config.maxHealth;
 
-        for (const particle of this.particles) {
-            // Check all neighbors for enemies
-            for (const dir of DIRECTIONS) {
-                const nx = particle.x + dir.dx;
-                const ny = particle.y + dir.dy;
+        // Use a simple array for dead particles (avoid array methods)
+        let deadCount = 0;
+        const deadParticles = this.deadParticlesBuffer || (this.deadParticlesBuffer = []);
 
-                const neighbor = this.getParticleAt(nx, ny);
-                if (neighbor && neighbor.team !== particle.team) {
-                    const myGrad = this.gradients[particle.team];
-                    if (!myGrad) continue;
+        const particles = this.particles;
+        const particleGrid = this.particleGrid;
+        const len = particles.length;
 
-                    const myCurrentDist = myGrad[particle.y]?.[particle.x];
-                    const enemyPosOnMyGrad = myGrad[neighbor.y]?.[neighbor.x];
+        for (let i = 0; i < len; i++) {
+            const particle = particles[i];
+            const px = particle.x;
+            const py = particle.y;
+            const myTeam = particle.team;
+            const myGrad = this.gradients[myTeam];
 
-                    if (myCurrentDist === undefined || enemyPosOnMyGrad === undefined) continue;
+            if (!myGrad) continue;
 
-                    // If enemy's cell is closer to MY cursor than my current cell,
-                    // the enemy is blocking my path - I attack them
+            const myCurrentDist = myGrad[py * w + px];
+
+            // Check all 8 neighbors
+            for (let d = 0; d < 8; d++) {
+                const dir = DIRECTIONS[d];
+                const nx = px + dir.dx;
+                const ny = py + dir.dy;
+
+                // Bounds check
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+
+                const neighbor = particleGrid[ny][nx];
+                if (!neighbor) continue;
+
+                if (neighbor.team !== myTeam) {
+                    // Enemy - check if blocking my path
+                    const enemyPosOnMyGrad = myGrad[ny * w + nx];
                     if (enemyPosOnMyGrad < myCurrentDist) {
-                        neighbor.health -= config.attackDamage;
+                        neighbor.health -= attackDamage;
                     }
-                }
-            }
-
-            // Check for allies to heal
-            for (const dir of DIRECTIONS) {
-                const nx = particle.x + dir.dx;
-                const ny = particle.y + dir.dy;
-
-                const neighbor = this.getParticleAt(nx, ny);
-                if (neighbor && neighbor.team === particle.team && neighbor.health < config.maxHealth) {
-                    neighbor.health = Math.min(config.maxHealth, neighbor.health + config.healAmount);
+                } else if (neighbor.health < maxHealth) {
+                    // Ally - heal them
+                    neighbor.health += healAmount;
+                    if (neighbor.health > maxHealth) neighbor.health = maxHealth;
                 }
             }
 
             // Check for death
             if (particle.health <= 0) {
-                deadParticles.push(particle);
+                deadParticles[deadCount++] = particle;
             }
         }
 
         // Convert dead particles to the killer's team
-        for (const dead of deadParticles) {
+        for (let i = 0; i < deadCount; i++) {
+            const dead = deadParticles[i];
+            const dx = dead.x;
+            const dy = dead.y;
+
             // Find the killer (adjacent enemy)
-            let killer = null;
-            for (const dir of DIRECTIONS) {
-                const nx = dead.x + dir.dx;
-                const ny = dead.y + dir.dy;
-                const neighbor = this.getParticleAt(nx, ny);
+            let killerTeam = null;
+            for (let d = 0; d < 8; d++) {
+                const dir = DIRECTIONS[d];
+                const nx = dx + dir.dx;
+                const ny = dy + dir.dy;
+
+                if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+
+                const neighbor = particleGrid[ny][nx];
                 if (neighbor && neighbor.team !== dead.team) {
-                    killer = neighbor;
+                    killerTeam = neighbor.team;
                     break;
                 }
             }
 
-            if (killer) {
-                // Convert to killer's team
-                dead.team = killer.team;
-                dead.health = config.maxHealth * 0.5;  // Respawn with half health
-            } else {
-                // No killer found, just restore health
-                dead.health = config.maxHealth * 0.5;
+            if (killerTeam) {
+                dead.team = killerTeam;
             }
+            dead.health = maxHealth * 0.5;
         }
     }
 
     updateParticleCounts() {
-        const counts = { p1: 0, p2: 0 };
+        const counts = {};
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            counts[`p${i}`] = 0;
+        }
         for (const p of this.particles) {
-            counts[p.team]++;
+            if (counts[p.team] !== undefined) {
+                counts[p.team]++;
+            }
         }
         this.state.particleCounts = counts;
     }
 
     endGame() {
-        const { p1, p2 } = this.state.particleCounts;
         this.state.phase = 'gameover';
 
-        if (p1 > p2) {
-            this.state.winner = 'p1';
-        } else if (p2 > p1) {
-            this.state.winner = 'p2';
+        // Find the winner (player with most particles)
+        let maxCount = 0;
+        let winners = [];
+
+        for (let i = 1; i <= this.totalPlayers; i++) {
+            const pid = `p${i}`;
+            const count = this.state.particleCounts[pid] || 0;
+            if (count > maxCount) {
+                maxCount = count;
+                winners = [pid];
+            } else if (count === maxCount && count > 0) {
+                winners.push(pid);
+            }
+        }
+
+        if (winners.length === 1) {
+            this.state.winner = winners[0];
+        } else if (winners.length > 1) {
+            this.state.winner = 'tie';
         } else {
+            // All eliminated somehow
             this.state.winner = 'tie';
         }
     }
@@ -694,9 +1152,15 @@ export class LiquidWarGame extends GameEngine {
 
     resetMatch() {
         const playerNames = this.state.playerNames;
-        this.state = getInitialState();
+        const aiPlayers = this.state.aiPlayers;
+        const mapId = this.state.mapId;
+        this.state = getInitialState(this.totalPlayers);
+        this.state.mapId = mapId;
         if (playerNames) {
             this.state.playerNames = playerNames;
+        }
+        if (aiPlayers) {
+            this.state.aiPlayers = aiPlayers;
         }
         this.gameOverNotified = false;
 
@@ -834,6 +1298,12 @@ export class LiquidWarGame extends GameEngine {
         super.destroy();
         this.input.destroy();
         this.network.stop();
+
+        // Clean up worker pool
+        if (this.workerPool) {
+            this.workerPool.destroy();
+            this.workerPool = null;
+        }
 
         if (this.isHost) {
             offMessage('rematch_request');
