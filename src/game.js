@@ -13,7 +13,7 @@ import {
 import { GameRegistry } from './games/GameRegistry.js';
 import { ResponsiveCanvas } from './ui/responsive.js';
 import { PONG_CONFIG } from './games/pong/config.js';
-import { getBasePath, getEntryPath } from './ui/url.js';
+import { getBasePath } from './ui/url.js';
 
 // Import games
 import './games/pong/index.js';
@@ -250,7 +250,8 @@ function returnToMenu(notifyPeer = true) {
     }
     const returnCode = gameCode || '';
     const targetUrl = new URL(window.location.href);
-    targetUrl.pathname = getEntryPath();
+    // Always redirect to index.html (lobby), not back to game.html
+    targetUrl.pathname = getBasePath() + 'index.html';
     targetUrl.searchParams.set('code', returnCode.toUpperCase());
     targetUrl.searchParams.delete('host');
     targetUrl.searchParams.delete('game');
@@ -379,7 +380,7 @@ gameCodeDisplay.addEventListener('click', async () => {
     if (!gameCode) return;
 
     const url = new URL(window.location.href);
-    url.pathname = getEntryPath();
+    url.pathname = getBasePath() + 'index.html';
     url.searchParams.set('code', gameCode.toUpperCase());
     url.searchParams.delete('host');
     url.searchParams.delete('game');
