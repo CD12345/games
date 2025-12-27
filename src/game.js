@@ -303,6 +303,9 @@ async function init() {
         const totalPlayers = parseInt(gameSettings.playerCount) || 2;
         const skipConnectionWait = isHost && supportsAI && connectedHumans < totalPlayers;
 
+        console.log('GAME: settings=', gameSettings);
+        console.log('GAME: supportsAI=', supportsAI, 'connectedHumans=', connectedHumans, 'totalPlayers=', totalPlayers, 'skipWait=', skipConnectionWait);
+
         await connectForGame(gameCode, isHost, skipConnectionWait);
 
         const playerNumber = isHost ? 1 : 2;
