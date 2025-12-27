@@ -114,14 +114,17 @@ export class LiquidWarGame extends GameEngine {
         this.state.playerCount = this.totalPlayers;
         this.initializeMap(mapId);
 
-        // Determine which players are human vs AI
-        // Currently: p1 = host, p2 = guest (if connected), rest are AI
+        // Determine which players are human vs AI based on actual connected humans
+        // p1 = host (always human), p2 = guest (human only if connected), rest are AI
+        const connectedHumans = parseInt(this.settings.connectedHumans) || 1;
         this.humanPlayers = new Set(['p1']);
-        if (this.totalPlayers >= 2) {
-            this.humanPlayers.add('p2'); // Guest player
+        if (connectedHumans >= 2 && this.totalPlayers >= 2) {
+            this.humanPlayers.add('p2'); // Guest player is connected
         }
 
-        // All other players are AI
+        debugLog(`Connected humans: ${connectedHumans}, total players: ${this.totalPlayers}`);
+
+        // All non-human players are AI
         this.aiPlayers = new Set();
         for (let i = 1; i <= this.totalPlayers; i++) {
             const pid = `p${i}`;

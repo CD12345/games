@@ -127,11 +127,13 @@ async function connectGuestToHost(code) {
     throw lastError || new Error('Unable to connect to host.');
 }
 
-async function connectForGame(code, host) {
+async function connectForGame(code, host, skipWait = false) {
     if (host) {
-        showStatus('Waiting for player to connect...');
         await initHostPeer(code);
-        await waitForConnection();
+        if (!skipWait) {
+            showStatus('Waiting for player to connect...');
+            await waitForConnection();
+        }
         return;
     }
 
@@ -294,7 +296,14 @@ async function init() {
     showStatus('Preparing game...');
 
     try {
-        await connectForGame(gameCode, isHost);
+        // Check if we should skip waiting for connection (AI fills missing slots)
+        const gameConfig = GameRegistry.getGame(gameType);
+        const supportsAI = gameConfig?.supportsAI === true;
+        const connectedHumans = parseInt(gameSettings.connectedHumans) || 1;
+        const totalPlayers = parseInt(gameSettings.playerCount) || 2;
+        const skipConnectionWait = isHost && supportsAI && connectedHumans < totalPlayers;
+
+        await connectForGame(gameCode, isHost, skipConnectionWait);
 
         const playerNumber = isHost ? 1 : 2;
 
