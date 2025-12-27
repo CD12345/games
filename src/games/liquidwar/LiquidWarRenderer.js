@@ -344,8 +344,7 @@ export class LiquidWarRenderer {
             this.renderGameOver(state, playerNumber);
         } else if (state.phase === 'playing') {
             // Draw time remaining
-            const elapsed = Date.now() - state.startTime;
-            const remaining = Math.max(0, LIQUID_WAR_CONFIG.game.maxTime - elapsed);
+            const remaining = Math.max(0, LIQUID_WAR_CONFIG.game.maxTime - state.elapsed);
             const seconds = Math.ceil(remaining / 1000);
             const minutes = Math.floor(seconds / 60);
             const secs = seconds % 60;
@@ -366,8 +365,7 @@ export class LiquidWarRenderer {
         const width = this.canvas.width;
         const height = this.canvas.height;
 
-        const elapsed = Date.now() - state.startTime;
-        const remaining = LIQUID_WAR_CONFIG.game.countdownTime - elapsed;
+        const remaining = LIQUID_WAR_CONFIG.game.countdownTime - state.elapsed;
         const seconds = Math.ceil(remaining / 1000);
 
         // Draw dark overlay

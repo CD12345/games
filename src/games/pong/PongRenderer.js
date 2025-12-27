@@ -51,8 +51,7 @@ export class PongRenderer {
 
         // Draw countdown or game over
         if (round.phase === 'countdown') {
-            const elapsed = Date.now() - round.startTime;
-            const remaining = Math.ceil((config.game.launchDelay - elapsed) / 1000);
+            const remaining = Math.ceil((config.game.launchDelay - round.elapsed) / 1000);
             this.drawCountdown(remaining);
         } else if (round.phase === 'scored') {
             const nameMap = playerNames || {};

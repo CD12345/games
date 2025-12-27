@@ -57,6 +57,7 @@ export function getInitialState() {
         round: {
             phase: 'countdown', // 'countdown', 'playing', 'scored', 'gameover'
             startTime: Date.now(),
+            elapsed: 0,         // Elapsed time in ms (synced from host)
             lastScorer: null,
             winner: null,
             forfeitBy: null
