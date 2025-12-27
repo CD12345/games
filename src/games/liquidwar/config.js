@@ -11,9 +11,9 @@ export const LIQUID_WAR_CONFIG = {
     particle: {
         initialCount: 1600,      // Particles per player at start
         maxHealth: 100,          // Maximum health per particle
-        attackDamage: 8,         // Damage dealt per tick when attacking
+        attackDamage: 16,        // Damage dealt per tick when attacking
         healAmount: 3,           // Health restored per tick when near ally
-        moveSpeed: 1,            // Cells moved per tick
+        moveSpeed: 2,            // Cells moved per tick
     },
 
     // Cursor settings
