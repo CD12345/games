@@ -19,6 +19,7 @@ import { getBasePath } from './ui/url.js';
 import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
+import './games/hextower/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
