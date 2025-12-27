@@ -315,7 +315,6 @@ async function init() {
         }
 
         // Set up responsive canvas
-        const gameConfig = GameRegistry.getGame(gameType);
         // Liquid War uses 1:1 (square), Pong uses portrait, others default to portrait
         let aspectRatio = 9 / 16;
         if (gameConfig?.id === 'pong') {
