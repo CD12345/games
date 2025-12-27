@@ -739,6 +739,25 @@ function updateSettingValue(gameType, settingId, value) {
     storeSettingsToCookie(gameType, currentSettings);
 }
 
+function refreshPreviews(gameType, changedSettingId) {
+    const game = GameRegistry.getGame(gameType);
+    if (!game?.getPreview) return;
+
+    // Find all preview containers that depend on the changed setting
+    const previews = document.querySelectorAll('.setting-preview');
+    previews.forEach(container => {
+        const dependsOn = container.dataset.dependsOn;
+        if (!dependsOn || dependsOn === changedSettingId) {
+            const settingId = container.dataset.settingId;
+            container.innerHTML = '';
+            const previewElement = game.getPreview(settingId, currentSettings);
+            if (previewElement) {
+                container.appendChild(previewElement);
+            }
+        }
+    });
+}
+
 function renderSettingsPanel(gameType, options = {}) {
     const game = GameRegistry.getGame(gameType);
     const settings = game?.settings || [];
@@ -831,9 +850,31 @@ function renderSettingsPanel(gameType, options = {}) {
                 });
                 input.addEventListener('change', () => {
                     updateSettingValue(gameType, setting.id, input.value);
+                    // Refresh previews that depend on this setting
+                    refreshPreviews(gameType, setting.id);
                 });
                 control.appendChild(input);
                 break;
+
+            case 'preview': {
+                // Read-only preview canvas/image
+                const previewContainer = document.createElement('div');
+                previewContainer.className = 'setting-preview';
+                previewContainer.id = `setting-preview-${options.prefix || 'lobby'}-${setting.id}`;
+                previewContainer.dataset.settingId = setting.id;
+                previewContainer.dataset.dependsOn = setting.dependsOn || '';
+
+                // Generate initial preview
+                if (game?.getPreview) {
+                    const previewElement = game.getPreview(setting.id, currentSettings);
+                    if (previewElement) {
+                        previewContainer.appendChild(previewElement);
+                    }
+                }
+
+                control.appendChild(previewContainer);
+                break;
+            }
         }
 
         div.appendChild(label);
