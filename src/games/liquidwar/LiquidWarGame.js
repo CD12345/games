@@ -95,7 +95,7 @@ export class LiquidWarGame extends GameEngine {
 
         // Web Worker pool for parallel gradient computation
         this.workerPool = null;
-        this.useWorkers = supportsWorkers();
+        this.useWorkers = false; // Temporarily disabled to debug - was: supportsWorkers();
         this.pendingGradients = null;  // Promise for async gradient computation
 
         // Game over handling
