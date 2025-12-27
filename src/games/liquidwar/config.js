@@ -716,6 +716,7 @@ export function getInitialState(playerCount = 2) {
     return {
         phase: 'countdown',  // 'countdown', 'playing', 'gameover'
         startTime: Date.now(),
+        elapsed: 0,  // Elapsed time in ms (synced from host)
         winner: null,
         mapId: 'arena',
         playerCount: count,
