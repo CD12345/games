@@ -20,6 +20,7 @@ import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
 import './games/hextd/index.js';
+import './games/corridorchase/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
