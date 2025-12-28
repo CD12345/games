@@ -250,22 +250,19 @@ function returnToMenu(notifyPeer = true) {
     if (notifyPeer) {
         sendMessage('return_to_menu', {});
     }
-    const targetUrl = new URL(window.location.href);
-    // Always redirect to index.html (lobby), not back to game.html
-    targetUrl.pathname = getBasePath() + 'index.html';
+
+    // Build URL from scratch to avoid path issues
+    const basePath = getBasePath();
+    let targetUrl = `${window.location.origin}${basePath}`;
 
     // Only include code if we have a valid one
     if (gameCode) {
-        targetUrl.searchParams.set('code', gameCode.toUpperCase());
-    } else {
-        targetUrl.searchParams.delete('code');
+        targetUrl += `?code=${gameCode.toUpperCase()}`;
     }
 
-    targetUrl.searchParams.delete('host');
-    targetUrl.searchParams.delete('game');
     cleanup();
     clearStoredSession();
-    window.location.href = targetUrl.toString();
+    window.location.href = targetUrl;
 }
 
 // Initialize
