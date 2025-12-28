@@ -251,9 +251,9 @@ function returnToMenu(notifyPeer = true) {
         sendMessage('return_to_menu', {});
     }
 
-    // Build URL from scratch to avoid path issues
-    const basePath = getBasePath();
-    let targetUrl = `${window.location.origin}${basePath}`;
+    // Build URL to go back to lobby (index.html or root)
+    // Always go to root, don't use getBasePath() as it includes the game.html directory
+    let targetUrl = `${window.location.origin}/`;
 
     // Only include code if we have a valid one
     if (gameCode) {
