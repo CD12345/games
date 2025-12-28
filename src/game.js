@@ -19,6 +19,7 @@ import { getBasePath } from './ui/url.js';
 import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
+import './games/hextd/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -316,12 +317,14 @@ async function init() {
         }
 
         // Set up responsive canvas
-        // Liquid War uses 1:1 (square), Pong uses portrait, others default to portrait
+        // Liquid War uses 1:1 (square), Pong uses portrait, HexTD uses landscape, others default to portrait
         let aspectRatio = 9 / 16;
         if (gameConfig?.id === 'pong') {
             aspectRatio = PONG_CONFIG.aspectRatio;
         } else if (gameConfig?.id === 'liquidwar') {
             aspectRatio = 1;  // Square
+        } else if (gameConfig?.id === 'hextd') {
+            aspectRatio = 16 / 9;  // Landscape for RTS
         }
         const container = document.getElementById('game-container');
         responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio, container);

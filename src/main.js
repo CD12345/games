@@ -24,6 +24,7 @@ import { getBasePath, storeEntryPath } from './ui/url.js';
 import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
+import './games/hextd/index.js';
 
 // DOM Elements
 const screens = {
