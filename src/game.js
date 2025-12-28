@@ -250,11 +250,17 @@ function returnToMenu(notifyPeer = true) {
     if (notifyPeer) {
         sendMessage('return_to_menu', {});
     }
-    const returnCode = gameCode || '';
     const targetUrl = new URL(window.location.href);
     // Always redirect to index.html (lobby), not back to game.html
     targetUrl.pathname = getBasePath() + 'index.html';
-    targetUrl.searchParams.set('code', returnCode.toUpperCase());
+
+    // Only include code if we have a valid one
+    if (gameCode) {
+        targetUrl.searchParams.set('code', gameCode.toUpperCase());
+    } else {
+        targetUrl.searchParams.delete('code');
+    }
+
     targetUrl.searchParams.delete('host');
     targetUrl.searchParams.delete('game');
     cleanup();
