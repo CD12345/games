@@ -107,8 +107,6 @@ export class HexTDGame extends GameEngine {
 
         // Create a new canvas for WebGL (the original canvas has a 2D context from GameEngine)
         this.webglCanvas = document.createElement('canvas');
-        this.webglCanvas.width = this.canvas.width;
-        this.webglCanvas.height = this.canvas.height;
         this.webglCanvas.style.position = 'absolute';
         this.webglCanvas.style.top = '0';
         this.webglCanvas.style.left = '0';
@@ -121,6 +119,9 @@ export class HexTDGame extends GameEngine {
         // Hide the original 2D canvas
         this.canvas.style.display = 'none';
 
+        // Set canvas dimensions to match actual display size
+        this.updateCanvasSize();
+
         // Dynamic import our renderer
         const { HexTDRenderer } = await import('./rendering/HexTDRenderer.js');
 
@@ -131,6 +132,31 @@ export class HexTDGame extends GameEngine {
         this.hexRenderer.onTileAction = (actionData) => {
             this.handleRadialMenuAction(actionData);
         };
+
+        // Handle window resize
+        this.resizeHandler = () => this.handleResize();
+        window.addEventListener('resize', this.resizeHandler);
+    }
+
+    updateCanvasSize() {
+        const rect = this.webglCanvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const width = Math.round(rect.width * dpr);
+        const height = Math.round(rect.height * dpr);
+
+        if (this.webglCanvas.width !== width || this.webglCanvas.height !== height) {
+            this.webglCanvas.width = width;
+            this.webglCanvas.height = height;
+            return true; // Size changed
+        }
+        return false;
+    }
+
+    handleResize() {
+        if (this.updateCanvasSize() && this.hexRenderer) {
+            const rect = this.webglCanvas.getBoundingClientRect();
+            this.hexRenderer.resize(rect.width, rect.height);
+        }
     }
 
     handleRadialMenuAction(actionData) {
@@ -743,12 +769,17 @@ export class HexTDGame extends GameEngine {
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
 
+        // Check if the camera controller detected this as a tap (not a drag)
+        const wasTap = this.hexRenderer?.cameraController?.wasTap() ?? false;
+
         // First, check if the radial menu wants to handle this touch
         if (this.hexRenderer?.radialMenu?.handleClick(x, y)) {
             return; // Menu handled it
         }
 
-        // Otherwise, pan camera to center on tapped tile
+        // Only pan to tapped tile if it was a tap, not a drag
+        if (!wasTap) return;
+
         const hex = this.hexRenderer?.screenToHex(touch.clientX, touch.clientY);
         if (!hex) return;
 
@@ -1034,6 +1065,12 @@ export class HexTDGame extends GameEngine {
         offMessage('player_name');
         offMessage('forfeit_request');
         offMessage('rematch_request');
+
+        // Remove resize listener
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        }
 
         this.hexRenderer?.dispose();
         this.hexRenderer = null;

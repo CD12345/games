@@ -54,13 +54,18 @@ export class HexTDRenderer {
     initialize() {
         const THREE = this.THREE;
 
+        // Get actual display dimensions
+        const rect = this.canvas.getBoundingClientRect();
+        const displayWidth = rect.width || this.canvas.width;
+        const displayHeight = rect.height || this.canvas.height;
+
         // Create WebGL renderer
         this.renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
             antialias: true,
             alpha: false
         });
-        this.renderer.setSize(this.canvas.width, this.canvas.height);
+        this.renderer.setSize(displayWidth, displayHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.setClearColor(0x1a1a2e);
         this.renderer.shadowMap.enabled = true;
@@ -70,16 +75,16 @@ export class HexTDRenderer {
         this.scene = new THREE.Scene();
         this.scene.fog = new THREE.Fog(0x1a1a2e, 100, 300);
 
-        // Create camera
-        const aspect = this.canvas.width / this.canvas.height;
+        // Create camera - use display dimensions for aspect ratio
+        const aspect = displayWidth / displayHeight;
         this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
 
         // Create sub-systems
         this.meshFactory = new HexMeshFactory(THREE);
         this.chunkManager = new ChunkManager(THREE, this.scene, this.grid, this.meshFactory);
         this.cameraController = new CameraController(THREE, this.camera, this.canvas);
-        this.uiOverlay = new UIOverlay(this.canvas.parentElement, this.canvas.width, this.canvas.height);
-        this.radialMenu = new RadialMenu(this.canvas.parentElement, this.canvas.width, this.canvas.height);
+        this.uiOverlay = new UIOverlay(this.canvas.parentElement, displayWidth, displayHeight);
+        this.radialMenu = new RadialMenu(this.canvas.parentElement, displayWidth, displayHeight);
 
         // Set up radial menu action callback
         this.radialMenu.onAction = (actionData) => {
@@ -553,6 +558,7 @@ export class HexTDRenderer {
     }
 
     resize(width, height) {
+        // Three.js renderer handles pixel ratio internally when using setSize
         this.renderer.setSize(width, height);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();

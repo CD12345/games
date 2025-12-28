@@ -42,6 +42,11 @@ export class CameraController {
         this.lastPinchDistance = 0;
         this.pointers = new Map();
 
+        // Track if current touch was a drag (moved more than tap threshold)
+        this.wasDragged = false;
+        this.touchStartPos = { x: 0, y: 0 };
+        this.TAP_THRESHOLD = 15; // pixels
+
         // Smoothing
         this.targetSmooth = this.target.clone();
         this.distanceSmooth = this.distance;
@@ -109,10 +114,13 @@ export class CameraController {
 
         if (this.pointers.size === 1) {
             this.isDragging = true;
+            this.wasDragged = false; // Reset drag detection
             const touch = e.touches[0];
             this.lastPointer = { x: touch.clientX, y: touch.clientY };
+            this.touchStartPos = { x: touch.clientX, y: touch.clientY };
         } else if (this.pointers.size === 2) {
             this.isDragging = false;
+            this.wasDragged = true; // Multi-touch counts as drag
             this.isPinching = true;
             this.lastPinchDistance = this.getPinchDistance(e.touches);
         }
@@ -144,6 +152,16 @@ export class CameraController {
             const dy = touch.clientY - this.lastPointer.y;
             this.lastPointer = { x: touch.clientX, y: touch.clientY };
             this.pan(dx, dy);
+
+            // Check if we've exceeded tap threshold
+            if (!this.wasDragged) {
+                const totalDx = touch.clientX - this.touchStartPos.x;
+                const totalDy = touch.clientY - this.touchStartPos.y;
+                const totalDist = Math.sqrt(totalDx * totalDx + totalDy * totalDy);
+                if (totalDist > this.TAP_THRESHOLD) {
+                    this.wasDragged = true;
+                }
+            }
         }
     }
 
@@ -234,6 +252,11 @@ export class CameraController {
     // Get the current look-at target
     getTarget() {
         return this.target.clone();
+    }
+
+    // Check if the last touch interaction was a tap (not a drag)
+    wasTap() {
+        return !this.wasDragged;
     }
 
     // Set distance directly
