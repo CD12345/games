@@ -20,6 +20,7 @@ import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
 import './games/hextd/index.js';
+import './games/historyrpg/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -298,12 +299,17 @@ async function init() {
     showStatus('Preparing game...');
 
     try {
-        // Check if we should skip waiting for connection (AI fills missing slots)
+        // Check if we should skip waiting for connection
         const gameConfig = GameRegistry.getGame(gameType);
         const supportsAI = gameConfig?.supportsAI === true;
+        const minPlayers = gameConfig?.minPlayers || 2;
         const connectedHumans = parseInt(gameSettings.connectedHumans) || 1;
         const totalPlayers = parseInt(gameSettings.playerCount) || 2;
-        const skipConnectionWait = isHost && supportsAI && connectedHumans < totalPlayers;
+
+        // Skip wait if: single-player game, OR AI fills missing slots
+        const isSinglePlayerGame = isHost && minPlayers === 1 && connectedHumans === 1;
+        const aiCanFillSlots = isHost && supportsAI && connectedHumans < totalPlayers;
+        const skipConnectionWait = isSinglePlayerGame || aiCanFillSlots;
 
         await connectForGame(gameCode, isHost, skipConnectionWait);
 
@@ -325,6 +331,8 @@ async function init() {
             aspectRatio = 1;  // Square
         } else if (gameConfig?.id === 'hextd') {
             aspectRatio = 16 / 9;  // Landscape for RTS
+        } else if (gameConfig?.id === 'historyrpg') {
+            aspectRatio = 16 / 9;  // Landscape for isometric view
         }
         const container = document.getElementById('game-container');
         responsiveCanvas = new ResponsiveCanvas(canvas, aspectRatio, container);
