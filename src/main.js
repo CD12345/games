@@ -296,6 +296,20 @@ function enableDebugMode() {
     showDebugIndicator();
 }
 
+function disableDebugMode() {
+    sessionStorage.removeItem('debugMode');
+    localStorage.removeItem('debugMode');
+    hideDebugIndicator();
+}
+
+function toggleDebugMode() {
+    if (isDebugMode()) {
+        disableDebugMode();
+    } else {
+        enableDebugMode();
+    }
+}
+
 function showDebugIndicator() {
     if (debugModeIndicator) return;
     debugModeIndicator = document.createElement('div');
@@ -313,6 +327,13 @@ function showDebugIndicator() {
     document.body.appendChild(debugModeIndicator);
 }
 
+function hideDebugIndicator() {
+    if (debugModeIndicator) {
+        debugModeIndicator.remove();
+        debugModeIndicator = null;
+    }
+}
+
 function setupDebugModeActivation() {
     if (isDebugMode()) {
         showDebugIndicator();
@@ -320,9 +341,7 @@ function setupDebugModeActivation() {
 
     const startHold = () => {
         debugModeHoldTimer = setTimeout(() => {
-            if (!isDebugMode()) {
-                enableDebugMode();
-            }
+            toggleDebugMode();
         }, 5000);
     };
 

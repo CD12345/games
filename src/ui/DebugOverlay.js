@@ -319,6 +319,13 @@ export function getDebugOverlay() {
     return globalDebug;
 }
 
+export function destroyDebugOverlay() {
+    if (globalDebug) {
+        globalDebug.destroy();
+        globalDebug = null;
+    }
+}
+
 // Convenience functions
 export function debugLog(message) {
     getDebugOverlay().log(message);
