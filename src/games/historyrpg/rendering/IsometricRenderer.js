@@ -3,6 +3,7 @@
 
 import { ISO, TILE_TYPES, LOD, CHUNK_SIZE } from '../config.js';
 import { TileFactory } from './TileFactory.js';
+import { CharacterRenderer } from './CharacterRenderer.js';
 
 // Minimap colors (simpler than full tile palettes)
 const MINIMAP_COLORS = {
@@ -34,6 +35,9 @@ export class IsometricRenderer {
 
         // Tile factory for sprite generation
         this.tileFactory = new TileFactory();
+
+        // Character renderer for players/NPCs
+        this.characterRenderer = new CharacterRenderer();
 
         // Pre-generate common sprites
         this.tileFactory.pregenerate();
@@ -142,7 +146,7 @@ export class IsometricRenderer {
 
         // Render player
         if (playerPos) {
-            this.renderPlayer(playerPos.x, playerPos.y);
+            this.renderPlayer(playerPos.x, playerPos.y, playerPos);
         }
     }
 
@@ -185,68 +189,21 @@ export class IsometricRenderer {
     }
 
     // Render the player character
-    renderPlayer(x, y) {
+    renderPlayer(x, y, player = {}) {
         const screen = this.worldToScreen(x, y, 0);
-
-        // Simple blocky character representation
-        const size = 24 * this.zoom;
-
-        // Body (rectangle)
-        this.ctx.fillStyle = '#3498db';
-        this.ctx.fillRect(
-            screen.x - size / 2,
-            screen.y - size * 1.5,
-            size,
-            size * 1.5
-        );
-
-        // Head (smaller rectangle)
-        this.ctx.fillStyle = '#f1c40f';
-        this.ctx.fillRect(
-            screen.x - size / 3,
-            screen.y - size * 2,
-            size * 0.66,
-            size * 0.5
-        );
-
-        // Outline
-        this.ctx.strokeStyle = '#2c3e50';
-        this.ctx.lineWidth = 2;
-        this.ctx.strokeRect(
-            screen.x - size / 2,
-            screen.y - size * 2,
-            size,
-            size * 2
-        );
+        this.characterRenderer.renderPlayer(this.ctx, screen.x, screen.y, player, this.zoom);
     }
 
     // Render an NPC
     renderNPC(x, y, npc) {
         const screen = this.worldToScreen(x, y, 0);
-        const size = 20 * this.zoom;
+        this.characterRenderer.renderNPC(this.ctx, screen.x, screen.y, npc, this.zoom);
+    }
 
-        // NPC color based on disposition
-        let color = '#95a5a6'; // Neutral gray
-        if (npc.disposition > 60) {
-            color = '#27ae60'; // Friendly green
-        } else if (npc.disposition < 40) {
-            color = '#e74c3c'; // Hostile red
-        }
-
-        // Body
-        this.ctx.fillStyle = color;
-        this.ctx.fillRect(
-            screen.x - size / 2,
-            screen.y - size * 1.5,
-            size,
-            size * 1.5
-        );
-
-        // Name label
-        this.ctx.fillStyle = '#fff';
-        this.ctx.font = `${12 * this.zoom}px monospace`;
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText(npc.name || 'NPC', screen.x, screen.y - size * 2 - 5);
+    // Render an item
+    renderItem(x, y, item) {
+        const screen = this.worldToScreen(x, y, 0);
+        this.characterRenderer.renderItem(this.ctx, screen.x, screen.y, item, this.zoom);
     }
 
     // Render UI elements (HUD)

@@ -5,6 +5,7 @@ import { WorldGrid } from './core/WorldGrid.js';
 import { ScenarioManager } from './core/ScenarioManager.js';
 import { EventSystem } from './core/EventSystem.js';
 import { TerrainGenerator } from './core/TerrainGenerator.js';
+import { EntityManager } from './core/EntityManager.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
@@ -34,6 +35,7 @@ export class HistoryRPGGame extends GameEngine {
         this.scenarioManager = null;
         this.eventSystem = null;
         this.terrainGenerator = null;
+        this.entityManager = null;
 
         // AI systems
         this.aiGateway = null;
@@ -63,6 +65,9 @@ export class HistoryRPGGame extends GameEngine {
         // Create terrain generator with seeded randomness
         const terrainSeed = this.gameCode ? this.gameCode.charCodeAt(0) * 1000 : 12345;
         this.terrainGenerator = new TerrainGenerator(terrainSeed);
+
+        // Create entity manager
+        this.entityManager = new EntityManager(this.worldGrid);
 
         // Create renderer
         this.renderer = new IsometricRenderer(this.canvas);
@@ -345,35 +350,33 @@ export class HistoryRPGGame extends GameEngine {
     loadScenarioNPCs(scenario) {
         if (!scenario.keyNPCs) return;
 
-        for (const npc of scenario.keyNPCs) {
-            this.state.npcs[npc.id] = {
-                ...npc,
+        const baseX = this.state.player.position.x;
+        const baseY = this.state.player.position.y;
+
+        for (let i = 0; i < scenario.keyNPCs.length; i++) {
+            const npcData = scenario.keyNPCs[i];
+
+            // Calculate position (spread around player start)
+            const offsetX = (i % 5) * 3 - 6;
+            const offsetY = Math.floor(i / 5) * 3 - 3;
+            const x = baseX + offsetX;
+            const y = baseY + offsetY;
+
+            // Create entity via EntityManager
+            if (this.entityManager) {
+                this.entityManager.createNPC(npcData, x, y);
+            }
+
+            // Also keep in state for backwards compatibility
+            this.state.npcs[npcData.id] = {
+                ...npcData,
                 mood: 'neutral',
                 met: false
             };
-
-            // Find NPC's starting location
-            if (npc.location && scenario.keyLocations) {
-                const location = scenario.keyLocations.find(l => l.id === npc.location);
-                if (location) {
-                    // Use player start area with offset for NPCs without explicit positions
-                    const baseX = this.state.player.position.x;
-                    const baseY = this.state.player.position.y;
-                    // Spread NPCs around based on their index
-                    const npcIndex = scenario.keyNPCs.indexOf(npc);
-                    const offsetX = (npcIndex % 5) * 3 - 6;
-                    const offsetY = Math.floor(npcIndex / 5) * 3 - 3;
-
-                    this.state.npcPositions[npc.id] = {
-                        x: baseX + offsetX,
-                        y: baseY + offsetY
-                    };
-                    this.worldGrid.addNPCAt(baseX + offsetX, baseY + offsetY, npc.id);
-                }
-            }
+            this.state.npcPositions[npcData.id] = { x, y };
         }
 
-        debugLog(`[HistoryRPG] Loaded ${Object.keys(this.state.npcs).length} NPCs`);
+        debugLog(`[HistoryRPG] Loaded ${scenario.keyNPCs.length} NPCs`);
     }
 
     // Load fallback scenario when AI is unavailable
@@ -575,6 +578,11 @@ export class HistoryRPGGame extends GameEngine {
         // Handle player movement
         this.updatePlayerMovement(deltaTime);
 
+        // Update entities (NPCs, items)
+        if (this.entityManager) {
+            this.entityManager.update(deltaTime, this.state.player.position);
+        }
+
         // Update camera
         this.renderer.setCamera(
             this.state.player.position.x,
@@ -594,8 +602,25 @@ export class HistoryRPGGame extends GameEngine {
         // Check for location discovery
         this.checkLocationDiscovery();
 
+        // Check for nearby interactables
+        this.checkNearbyInteractables();
+
         // Update notifications (fade out old ones)
         this.updateNotifications(deltaTime);
+    }
+
+    // Check for interactable entities nearby
+    checkNearbyInteractables() {
+        if (!this.entityManager) return;
+
+        const nearbyEntities = this.entityManager.getInteractablesNear(
+            this.state.player.position.x,
+            this.state.player.position.y,
+            2
+        );
+
+        // Store for UI hints
+        this.state.nearbyInteractables = nearbyEntities;
     }
 
     // Check if player has discovered a new location
@@ -727,14 +752,33 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     render() {
-        // Render world
-        this.renderer.renderWorld(this.worldGrid, this.state.player.position);
+        // Render world with player data (for facing direction, etc)
+        const playerData = {
+            ...this.state.player.position,
+            facing: this.state.player.facing,
+            velocity: this.targetPos ? { x: 1, y: 1 } : { x: 0, y: 0 }
+        };
+        this.renderer.renderWorld(this.worldGrid, playerData);
 
-        // Render NPCs
-        for (const [npcId, npc] of Object.entries(this.state.npcs)) {
-            const pos = this.state.npcPositions[npcId];
-            if (pos) {
-                this.renderer.renderNPC(pos.x, pos.y, npc);
+        // Render entities from entity manager
+        if (this.entityManager) {
+            const entities = this.entityManager.getEntitiesByType('npc');
+            for (const entity of entities) {
+                this.renderer.renderNPC(entity.position.x, entity.position.y, entity);
+            }
+
+            // Render items
+            const items = this.entityManager.getEntitiesByType('item');
+            for (const item of items) {
+                this.renderer.renderItem(item.position.x, item.position.y, item);
+            }
+        } else {
+            // Fallback to state.npcs
+            for (const [npcId, npc] of Object.entries(this.state.npcs)) {
+                const pos = this.state.npcPositions[npcId];
+                if (pos) {
+                    this.renderer.renderNPC(pos.x, pos.y, npc);
+                }
             }
         }
 
