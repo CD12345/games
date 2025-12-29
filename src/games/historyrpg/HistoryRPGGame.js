@@ -2,6 +2,8 @@
 
 import { GameEngine } from '../../engine/GameEngine.js';
 import { WorldGrid } from './core/WorldGrid.js';
+import { ScenarioManager } from './core/ScenarioManager.js';
+import { EventSystem } from './core/EventSystem.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
@@ -28,6 +30,8 @@ export class HistoryRPGGame extends GameEngine {
         // Core systems
         this.worldGrid = null;
         this.renderer = null;
+        this.scenarioManager = null;
+        this.eventSystem = null;
 
         // AI systems
         this.aiGateway = null;
@@ -60,6 +64,15 @@ export class HistoryRPGGame extends GameEngine {
         // Initialize AI systems
         this.initializeAI();
 
+        // Create scenario manager (pass generation queue for AI generation)
+        this.scenarioManager = new ScenarioManager(this.generationQueue);
+
+        // Create event system (linked to scenario manager)
+        this.eventSystem = new EventSystem(this.scenarioManager);
+
+        // Set up event system callbacks
+        this.setupEventCallbacks();
+
         // Set up input handlers
         this.setupInputHandlers();
 
@@ -83,6 +96,67 @@ export class HistoryRPGGame extends GameEngine {
         this.state.phase = PHASES.PLAYING;
 
         console.log('[HistoryRPG] Initialized');
+    }
+
+    // Set up event system callbacks
+    setupEventCallbacks() {
+        // Objective complete notification
+        this.scenarioManager.onObjectiveComplete = (objective) => {
+            debugLog(`[HistoryRPG] Objective complete: ${objective.objective}`);
+            this.showNotification(`Objective Complete: ${objective.objective}`);
+        };
+
+        // Location discovered notification
+        this.scenarioManager.onLocationDiscovered = (location) => {
+            debugLog(`[HistoryRPG] Location discovered: ${location.name}`);
+            this.showNotification(`Discovered: ${location.name}`);
+        };
+
+        // Historical event triggered
+        this.scenarioManager.onEventTriggered = (event) => {
+            debugLog(`[HistoryRPG] Event triggered: ${event?.name || 'Unknown'}`);
+        };
+
+        // Game completion
+        this.scenarioManager.onGameComplete = (result) => {
+            debugLog(`[HistoryRPG] Game complete! Deviation: ${result.deviationScore}`);
+            this.state.phase = PHASES.GAME_OVER;
+            this.state.gameResult = result;
+        };
+
+        // Event system callbacks
+        this.eventSystem.onEventStart = (event) => {
+            debugLog(`[HistoryRPG] Historical event: ${event.name}`);
+            this.showNotification(`Historical Event: ${event.name}`, event.description);
+        };
+
+        this.eventSystem.onDayChange = (date) => {
+            debugLog(`[HistoryRPG] New day: ${date.toDateString()}`);
+        };
+
+        this.eventSystem.onTimeChange = (timeInfo) => {
+            this.state.world.timeOfDay = timeInfo.hour + timeInfo.minute / 60;
+        };
+    }
+
+    // Show in-game notification
+    showNotification(title, description = '') {
+        // Add to notification queue (rendered in UI)
+        if (!this.state.notifications) {
+            this.state.notifications = [];
+        }
+
+        this.state.notifications.push({
+            title,
+            description,
+            timestamp: Date.now(),
+            duration: 5000
+        });
+
+        // Keep only recent notifications
+        if (this.state.notifications.length > 5) {
+            this.state.notifications.shift();
+        }
     }
 
     // Initialize AI systems
@@ -182,17 +256,22 @@ export class HistoryRPGGame extends GameEngine {
                     characterType: this.settings.characterType || 'Civilian'
                 });
 
+                // Load scenario into manager
+                this.scenarioManager.loadScenario(scenario);
                 this.state.scenario = scenario;
                 debugLog(`[HistoryRPG] Scenario generated: ${scenario.title}`);
                 console.log('[HistoryRPG] Scenario generated:', scenario.title);
 
+                // Initialize event system with scenario
+                this.eventSystem.initialize(scenario);
+
                 // Set player start position from scenario
                 if (scenario.playerStart) {
                     this.state.player.position = {
-                        x: scenario.playerStart.x,
-                        y: scenario.playerStart.y
+                        x: scenario.playerStart.position?.x || 128,
+                        y: scenario.playerStart.position?.y || 128
                     };
-                    debugLog(`[HistoryRPG] Player start: (${scenario.playerStart.x}, ${scenario.playerStart.y})`);
+                    debugLog(`[HistoryRPG] Player start: (${this.state.player.position.x}, ${this.state.player.position.y})`);
                 }
 
                 // Load NPCs from scenario
@@ -202,15 +281,58 @@ export class HistoryRPGGame extends GameEngine {
                 return;
             } catch (error) {
                 debugLog(`[HistoryRPG] Scenario generation FAILED: ${error.message}`);
-                console.warn('[HistoryRPG] Failed to generate scenario, using fallback:', error);
+                console.warn('[HistoryRPG] Failed to generate scenario, trying pre-built:', error);
             }
         } else {
-            debugLog(`[HistoryRPG] AI not available, using fallback`);
+            debugLog(`[HistoryRPG] AI not available, trying pre-built scenario`);
         }
 
-        // Use fallback scenario
+        // Try to load pre-built scenario from JSON file
+        const prebuiltLoaded = await this.loadPrebuiltScenario(scenarioConfig);
+        if (prebuiltLoaded) {
+            debugLog(`[HistoryRPG] Pre-built scenario loaded`);
+            return;
+        }
+
+        // Use minimal fallback scenario
         this.loadFallbackScenario(scenarioConfig);
         debugLog(`[HistoryRPG] Fallback scenario loaded`);
+    }
+
+    // Try to load pre-built scenario from JSON file
+    async loadPrebuiltScenario(config) {
+        try {
+            // Determine the scenario data path based on config
+            const scenarioPath = `./src/games/historyrpg/data/stalingrad/scenario.json`;
+            debugLog(`[HistoryRPG] Loading pre-built scenario from: ${scenarioPath}`);
+
+            this.renderLoadingScreen('Loading scenario...');
+
+            const scenario = await this.scenarioManager.loadFromFile(scenarioPath);
+
+            this.state.scenario = scenario;
+            debugLog(`[HistoryRPG] Pre-built scenario loaded: ${scenario.title}`);
+
+            // Initialize event system with scenario
+            this.eventSystem.initialize(scenario);
+
+            // Set player start position
+            if (scenario.playerStart) {
+                this.state.player.position = {
+                    x: scenario.playerStart.position?.x || 128,
+                    y: scenario.playerStart.position?.y || 128
+                };
+            }
+
+            // Load NPCs from scenario
+            this.loadScenarioNPCs(scenario);
+
+            return true;
+        } catch (error) {
+            debugLog(`[HistoryRPG] Failed to load pre-built scenario: ${error.message}`);
+            console.warn('[HistoryRPG] Could not load pre-built scenario:', error);
+            return false;
+        }
     }
 
     // Load NPCs from generated scenario
@@ -220,18 +342,32 @@ export class HistoryRPGGame extends GameEngine {
         for (const npc of scenario.keyNPCs) {
             this.state.npcs[npc.id] = {
                 ...npc,
-                mood: 'neutral'
+                mood: 'neutral',
+                met: false
             };
 
             // Find NPC's starting location
-            if (npc.locationId && scenario.keyLocations) {
-                const location = scenario.keyLocations.find(l => l.id === npc.locationId);
+            if (npc.location && scenario.keyLocations) {
+                const location = scenario.keyLocations.find(l => l.id === npc.location);
                 if (location) {
-                    this.state.npcPositions[npc.id] = { x: location.x, y: location.y };
-                    this.worldGrid.addNPCAt(location.x, location.y, npc.id);
+                    // Use player start area with offset for NPCs without explicit positions
+                    const baseX = this.state.player.position.x;
+                    const baseY = this.state.player.position.y;
+                    // Spread NPCs around based on their index
+                    const npcIndex = scenario.keyNPCs.indexOf(npc);
+                    const offsetX = (npcIndex % 5) * 3 - 6;
+                    const offsetY = Math.floor(npcIndex / 5) * 3 - 3;
+
+                    this.state.npcPositions[npc.id] = {
+                        x: baseX + offsetX,
+                        y: baseY + offsetY
+                    };
+                    this.worldGrid.addNPCAt(baseX + offsetX, baseY + offsetY, npc.id);
                 }
             }
         }
+
+        debugLog(`[HistoryRPG] Loaded ${Object.keys(this.state.npcs).length} NPCs`);
     }
 
     // Load fallback scenario when AI is unavailable
@@ -404,8 +540,10 @@ export class HistoryRPGGame extends GameEngine {
         // Update elapsed time
         this.state.elapsed += deltaTime;
 
-        // Update game time
-        this.updateGameTime(deltaTime);
+        // Update event system (handles game time and historical events)
+        if (this.eventSystem) {
+            this.eventSystem.update(deltaTime);
+        }
 
         // Handle player movement
         this.updatePlayerMovement(deltaTime);
@@ -425,18 +563,60 @@ export class HistoryRPGGame extends GameEngine {
 
         // Check for chunks that need loading
         this.checkChunkLoading();
+
+        // Check for location discovery
+        this.checkLocationDiscovery();
+
+        // Update notifications (fade out old ones)
+        this.updateNotifications(deltaTime);
     }
 
-    updateGameTime(deltaTime) {
-        // Advance game time
-        const hoursPerSecond = TIME.HOURS_PER_REAL_MINUTE / 60;
-        this.state.world.timeOfDay += deltaTime * hoursPerSecond;
+    // Check if player has discovered a new location
+    checkLocationDiscovery() {
+        if (!this.state.scenario?.keyLocations || !this.scenarioManager) return;
 
-        // Wrap around at 24 hours
-        if (this.state.world.timeOfDay >= 24) {
-            this.state.world.timeOfDay -= 24;
-            this.state.world.daysPassed++;
+        const px = Math.floor(this.state.player.position.x);
+        const py = Math.floor(this.state.player.position.y);
+
+        // For now, just check proximity to key locations
+        // In future, this could be more sophisticated
+        for (const location of this.state.scenario.keyLocations) {
+            if (this.scenarioManager.discoveredLocations.has(location.id)) continue;
+
+            // Simplified proximity check (could be improved with actual location bounds)
+            // For now, discover locations when nearby
+            const locX = location.position?.x || 128;
+            const locY = location.position?.y || 128;
+            const dist = Math.abs(px - locX) + Math.abs(py - locY);
+
+            if (dist < 10) {
+                this.scenarioManager.discoverLocation(location.id);
+            }
         }
+    }
+
+    // Update notifications (remove expired ones)
+    updateNotifications(deltaTime) {
+        if (!this.state.notifications) return;
+
+        const now = Date.now();
+        this.state.notifications = this.state.notifications.filter(
+            n => now - n.timestamp < n.duration
+        );
+    }
+
+    // Get current time info from event system
+    getTimeInfo() {
+        if (this.eventSystem) {
+            return this.eventSystem.getTimeInfo();
+        }
+        return {
+            hour: Math.floor(this.state.world.timeOfDay),
+            minute: 0,
+            timeOfDay: 'day',
+            dateString: 'Unknown Date',
+            timeString: '12:00 PM'
+        };
     }
 
     updatePlayerMovement(deltaTime) {
@@ -532,8 +712,9 @@ export class HistoryRPGGame extends GameEngine {
             }
         }
 
-        // Render UI
-        this.renderer.renderUI(this.state);
+        // Render UI with time info
+        const timeInfo = this.getTimeInfo();
+        this.renderer.renderUI(this.state, timeInfo);
 
         // Render minimap
         this.renderer.renderMinimap(
@@ -542,10 +723,115 @@ export class HistoryRPGGame extends GameEngine {
             120
         );
 
+        // Render notifications
+        this.renderNotifications();
+
         // Render pause overlay
         if (this.state.phase === PHASES.PAUSED) {
             this.renderPauseOverlay();
         }
+
+        // Render game over overlay
+        if (this.state.phase === PHASES.GAME_OVER) {
+            this.renderGameOverOverlay();
+        }
+    }
+
+    // Render notification popups
+    renderNotifications() {
+        if (!this.state.notifications || this.state.notifications.length === 0) return;
+
+        const ctx = this.ctx;
+        const now = Date.now();
+
+        let y = 100;
+        for (const notification of this.state.notifications) {
+            const elapsed = now - notification.timestamp;
+            const remaining = notification.duration - elapsed;
+
+            // Fade out in last second
+            let alpha = 1;
+            if (remaining < 1000) {
+                alpha = remaining / 1000;
+            }
+
+            // Slide in effect
+            let slideOffset = 0;
+            if (elapsed < 300) {
+                slideOffset = (1 - elapsed / 300) * 200;
+            }
+
+            ctx.save();
+            ctx.globalAlpha = alpha;
+
+            // Background
+            const x = this.canvas.width - 320 + slideOffset;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(x, y, 300, notification.description ? 60 : 40);
+
+            // Border
+            ctx.strokeStyle = '#c9a227';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, 300, notification.description ? 60 : 40);
+
+            // Title
+            ctx.fillStyle = '#c9a227';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(notification.title, x + 10, y + 20);
+
+            // Description
+            if (notification.description) {
+                ctx.fillStyle = '#ccc';
+                ctx.font = '12px monospace';
+                ctx.fillText(notification.description.substring(0, 40), x + 10, y + 45);
+            }
+
+            ctx.restore();
+            y += notification.description ? 70 : 50;
+        }
+    }
+
+    // Render game over screen
+    renderGameOverOverlay() {
+        const ctx = this.ctx;
+        const result = this.state.gameResult || {};
+
+        // Dim background
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Title
+        ctx.fillStyle = '#c9a227';
+        ctx.font = 'bold 32px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('SCENARIO COMPLETE', this.canvas.width / 2, this.canvas.height / 2 - 60);
+
+        // Main goal status
+        ctx.fillStyle = '#fff';
+        ctx.font = '18px monospace';
+        ctx.fillText(
+            result.mainGoalComplete ? 'Main objective achieved!' : 'Main objective failed',
+            this.canvas.width / 2,
+            this.canvas.height / 2
+        );
+
+        // Historical deviation score
+        ctx.font = '16px monospace';
+        ctx.fillStyle = '#888';
+        ctx.fillText(
+            `Historical Deviation: ${result.deviationScore || 0}%`,
+            this.canvas.width / 2,
+            this.canvas.height / 2 + 40
+        );
+
+        // Optional goals
+        const optionalComplete = result.optionalGoalsComplete?.length || 0;
+        ctx.fillText(
+            `Optional Goals: ${optionalComplete} completed`,
+            this.canvas.width / 2,
+            this.canvas.height / 2 + 70
+        );
     }
 
     renderPauseOverlay() {
@@ -628,8 +914,11 @@ export class HistoryRPGGame extends GameEngine {
         const npc = this.state.npcs[npcId];
         if (!npc) return;
 
-        // Mark as met
+        // Mark as met in both local state and scenario manager
         npc.met = true;
+        if (this.scenarioManager) {
+            this.scenarioManager.meetNPC(npcId);
+        }
 
         // If AI is available, generate dynamic greeting
         if (this.aiGateway.isAvailable()) {

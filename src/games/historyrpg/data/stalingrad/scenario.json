@@ -1,0 +1,419 @@
+{
+    "scenario": {
+        "id": "stalingrad_1942",
+        "title": "The Siege of Stalingrad",
+        "subtitle": "November 1942 - The Turning Point",
+        "timePeriod": "World War 2",
+        "date": "1942-11-19",
+        "endDate": "1942-11-23",
+        "location": {
+            "name": "Stalingrad",
+            "country": "Soviet Union",
+            "coordinates": {
+                "lat": 48.7194,
+                "lon": 44.5018
+            }
+        },
+        "historicalContext": "The German 6th Army under General Friedrich Paulus has been fighting for control of Stalingrad since August. The city lies in ruins, with brutal house-to-house combat. Unknown to the Germans, the Soviet High Command is about to launch Operation Uranus, a massive counteroffensive that will encircle the entire 6th Army.",
+
+        "playerStart": {
+            "locationId": "factory_district",
+            "position": { "x": 32, "y": 32 },
+            "defaultCharacter": {
+                "type": "civilian",
+                "name": "Alexei Volkov",
+                "age": 34,
+                "background": "Factory worker trapped in the city",
+                "skills": ["mechanical_knowledge", "local_knowledge", "survival"]
+            }
+        },
+
+        "mainGoal": {
+            "id": "escape_city",
+            "title": "Escape Stalingrad",
+            "description": "Find a way to escape the besieged city before you become another casualty of this brutal battle.",
+            "successCondition": "Reach the Soviet lines east of the Volga River"
+        },
+
+        "goalPath": [
+            {
+                "step": 1,
+                "objective": "Find supplies in the ruined factory",
+                "description": "Search the destroyed tractor factory for food, water, and warm clothing. Winter is coming.",
+                "locationId": "tractor_factory",
+                "detailLevel": "high",
+                "hints": ["Check the worker dormitories", "The storage rooms may have canned goods"],
+                "requirements": []
+            },
+            {
+                "step": 2,
+                "objective": "Obtain travel documents",
+                "description": "Without proper papers, you'll be shot by either side. Find someone who can help.",
+                "locationId": "factory_district",
+                "detailLevel": "high",
+                "hints": ["The old party official might help", "Documents can be found on the dead"],
+                "requirements": ["supplies"]
+            },
+            {
+                "step": 3,
+                "objective": "Cross to the Volga riverbank",
+                "description": "Navigate through the ruins to reach the frozen Volga. Both armies patrol the streets.",
+                "locationId": "city_center",
+                "detailLevel": "medium",
+                "hints": ["Move at night", "The sewers provide cover", "Avoid the grain elevator - heavy fighting there"],
+                "requirements": ["documents"]
+            },
+            {
+                "step": 4,
+                "objective": "Find transportation across the river",
+                "description": "The river is partially frozen but treacherous. Find a boat or a safe crossing point.",
+                "locationId": "riverbank",
+                "detailLevel": "high",
+                "hints": ["Fishermen sometimes make crossings", "Military ferries run at night"],
+                "requirements": ["riverbank_access"]
+            },
+            {
+                "step": 5,
+                "objective": "Reach Soviet lines",
+                "description": "Cross the Volga and make contact with Soviet forces on the eastern bank.",
+                "locationId": "volga_river",
+                "detailLevel": "medium",
+                "hints": ["Signal with a white cloth", "Identify yourself loudly in Russian"],
+                "requirements": ["transportation"]
+            }
+        ],
+
+        "optionalGoals": [
+            {
+                "id": "save_children",
+                "title": "Save the Orphans",
+                "description": "A group of orphaned children are hiding in the basement of School No. 4. Help them escape.",
+                "reward": { "reputation": { "civilian": 30 }, "knowledge": ["orphan_network"] }
+            },
+            {
+                "id": "sabotage_german",
+                "title": "Saboteur",
+                "description": "Destroy German ammunition supplies at the train station.",
+                "reward": { "reputation": { "soviet": 25, "german": -50 }, "deviation": 5 }
+            },
+            {
+                "id": "find_family",
+                "title": "Family Reunion",
+                "description": "Your sister was last seen near the grain elevator. Find out what happened to her.",
+                "reward": { "knowledge": ["sister_fate"], "items": ["family_photo"] }
+            },
+            {
+                "id": "help_wounded",
+                "title": "Angel of Mercy",
+                "description": "Help the overwhelmed Soviet field hospital treat wounded soldiers.",
+                "reward": { "reputation": { "soviet": 15, "civilian": 10 }, "knowledge": ["medical_contacts"] }
+            }
+        ],
+
+        "keyLocations": [
+            {
+                "id": "factory_district",
+                "name": "Factory District",
+                "type": "district",
+                "description": "The industrial heart of Stalingrad, now a maze of rubble and twisted metal. The famous tractor factory dominates the skyline.",
+                "atmosphere": "Acrid smoke hangs in the air. The distant thud of artillery never stops. Shadows move through the ruins.",
+                "features": ["ruined_buildings", "industrial_debris", "soviet_positions"],
+                "dangerLevel": 3,
+                "discovered": true
+            },
+            {
+                "id": "tractor_factory",
+                "name": "Stalingrad Tractor Factory",
+                "type": "building",
+                "parentLocation": "factory_district",
+                "description": "Once produced tanks for the Red Army, now a fortress of rubble where soldiers fight room to room.",
+                "atmosphere": "Burnt oil and cordite. The skeletal remains of machinery loom in the darkness.",
+                "features": ["storage_rooms", "dormitories", "assembly_hall", "underground_tunnels"],
+                "dangerLevel": 4,
+                "npcsPresent": ["sgt_petrov", "worker_ivan"]
+            },
+            {
+                "id": "city_center",
+                "name": "City Center",
+                "type": "district",
+                "description": "The administrative heart of Stalingrad. Most buildings are destroyed, but fighting continues in the basements and upper floors.",
+                "atmosphere": "Eerie silence punctuated by gunfire. Snow begins to fall on the rubble.",
+                "features": ["department_store", "soviet_hq", "german_positions", "sewer_access"],
+                "dangerLevel": 5,
+                "discovered": false
+            },
+            {
+                "id": "grain_elevator",
+                "name": "Grain Elevator",
+                "type": "building",
+                "parentLocation": "city_center",
+                "description": "A massive concrete structure that has changed hands multiple times. Currently contested.",
+                "atmosphere": "The smell of burnt grain and death. Constant gunfire from all floors.",
+                "features": ["observation_point", "grain_storage", "defensive_positions"],
+                "dangerLevel": 5,
+                "npcsPresent": []
+            },
+            {
+                "id": "riverbank",
+                "name": "Volga Riverbank",
+                "type": "district",
+                "description": "The narrow strip of Soviet-held territory along the Volga. Supply boats cross at night under German fire.",
+                "atmosphere": "The cold wind off the river. Ice forming along the banks. The crack of sniper fire.",
+                "features": ["ferry_landing", "field_hospital", "supply_depot", "defensive_dugouts"],
+                "dangerLevel": 4,
+                "discovered": false
+            },
+            {
+                "id": "volga_river",
+                "name": "Volga River",
+                "type": "water",
+                "description": "The mighty Volga, beginning to freeze. The only supply line for Soviet forces in the city.",
+                "atmosphere": "Bitter cold. Ice floes drift past. German shells occasionally burst on the water.",
+                "features": ["ice_sheets", "ferry_routes", "sunken_boats"],
+                "dangerLevel": 3,
+                "discovered": false
+            },
+            {
+                "id": "sewers",
+                "name": "Sewer System",
+                "type": "underground",
+                "description": "The underground tunnels beneath the city. Used by both sides for surprise attacks and movement.",
+                "atmosphere": "Pitch darkness. The echo of dripping water. Distant voices that could be friend or foe.",
+                "features": ["tunnel_network", "hidden_caches", "collapsed_sections"],
+                "dangerLevel": 3,
+                "discovered": false
+            },
+            {
+                "id": "school_4",
+                "name": "School No. 4",
+                "type": "building",
+                "parentLocation": "factory_district",
+                "description": "A destroyed school building. Civilians have taken shelter in the basement.",
+                "atmosphere": "Children's drawings on the walls, now covered in dust and blood. The sound of crying.",
+                "features": ["basement_shelter", "collapsed_upper_floors", "playground_ruins"],
+                "dangerLevel": 2,
+                "npcsPresent": ["teacher_maria", "orphan_group"]
+            }
+        ],
+
+        "keyNPCs": [
+            {
+                "id": "sgt_petrov",
+                "name": "Sergeant Yuri Petrov",
+                "type": "soldier",
+                "faction": "soviet",
+                "location": "tractor_factory",
+                "description": "A grizzled veteran of the defense. Missing two fingers from his left hand.",
+                "personality": "Pragmatic, weary, but determined. Has seen too much death to be idealistic.",
+                "disposition": 40,
+                "knowledge": ["military_movements", "safe_routes", "german_positions"],
+                "canProvide": ["directions", "military_intel", "temporary_shelter"],
+                "dialogueHooks": ["asks about factory workers", "needs medical supplies", "knows about river crossings"]
+            },
+            {
+                "id": "worker_ivan",
+                "name": "Ivan Kuznetsov",
+                "type": "civilian",
+                "faction": "civilian",
+                "location": "tractor_factory",
+                "description": "Former factory foreman, now trapped in the ruins with other workers.",
+                "personality": "Resourceful, protective of his people, distrustful of outsiders.",
+                "disposition": 30,
+                "knowledge": ["factory_layout", "hidden_supplies", "worker_survivors"],
+                "canProvide": ["supplies", "shelter", "local_information"],
+                "dialogueHooks": ["worried about family", "knows secret tunnels", "has useful tools"]
+            },
+            {
+                "id": "teacher_maria",
+                "name": "Maria Sokolova",
+                "type": "civilian",
+                "faction": "civilian",
+                "location": "school_4",
+                "description": "A young teacher protecting a group of orphaned children.",
+                "personality": "Brave, selfless, exhausted. Will do anything to save the children.",
+                "disposition": 50,
+                "knowledge": ["child_locations", "civilian_networks", "safe_houses"],
+                "canProvide": ["information", "moral_support", "connections"],
+                "dialogueHooks": ["desperate for food", "needs help evacuating children", "knows hidden paths"]
+            },
+            {
+                "id": "commissar_volkov",
+                "name": "Commissar Dmitri Volkov",
+                "type": "official",
+                "faction": "soviet",
+                "location": "city_center",
+                "description": "A political officer who controls access to official documents.",
+                "personality": "Suspicious, ideologically rigid, but can be pragmatic when needed.",
+                "disposition": 20,
+                "knowledge": ["document_procedures", "evacuation_routes", "party_contacts"],
+                "canProvide": ["documents", "official_passage", "military_escort"],
+                "dialogueHooks": ["demands proof of loyalty", "needs favors done", "can be bribed"]
+            },
+            {
+                "id": "doctor_elena",
+                "name": "Dr. Elena Morozova",
+                "type": "civilian",
+                "faction": "civilian",
+                "location": "riverbank",
+                "description": "An exhausted surgeon working at the field hospital.",
+                "personality": "Compassionate, overworked, pragmatic about survival.",
+                "disposition": 45,
+                "knowledge": ["medical_treatment", "evacuation_boats", "wounded_soldiers"],
+                "canProvide": ["healing", "hospital_access", "ferry_information"],
+                "dialogueHooks": ["needs medical supplies", "knows boat schedules", "has contacts across river"]
+            },
+            {
+                "id": "fisherman_grigory",
+                "name": "Grigory the Fisherman",
+                "type": "civilian",
+                "faction": "civilian",
+                "location": "riverbank",
+                "description": "An old fisherman who still makes dangerous crossings of the Volga.",
+                "personality": "Gruff, mercenary, but honorable in his own way.",
+                "disposition": 35,
+                "knowledge": ["river_crossings", "ice_conditions", "patrol_schedules"],
+                "canProvide": ["river_transportation", "timing_information", "safe_routes"],
+                "dialogueHooks": ["charges high prices", "knows every sandbar", "lost his family to bombing"]
+            },
+            {
+                "id": "german_deserter",
+                "name": "Hans Weber",
+                "type": "soldier",
+                "faction": "german",
+                "location": "sewers",
+                "description": "A German soldier who has deserted, hiding in the sewers.",
+                "personality": "Terrified, remorseful, desperate to survive.",
+                "disposition": 25,
+                "knowledge": ["german_positions", "patrol_routes", "supply_locations"],
+                "canProvide": ["german_intel", "military_supplies", "alternative_routes"],
+                "dialogueHooks": ["begs for help", "has useful information", "morally conflicted"]
+            }
+        ],
+
+        "historicalEvents": [
+            {
+                "id": "operation_uranus_begins",
+                "name": "Operation Uranus Begins",
+                "date": "1942-11-19",
+                "description": "The Soviet counteroffensive begins north of Stalingrad. Massive artillery bombardment signals the attack.",
+                "effect": "Increased Soviet activity. German supply lines threatened. Hope rises among defenders.",
+                "triggers": ["soviet_reputation_boost", "german_morale_drop"]
+            },
+            {
+                "id": "southern_pincer",
+                "name": "Southern Pincer Attacks",
+                "date": "1942-11-20",
+                "description": "Soviet forces attack from the south, beginning the encirclement of the German 6th Army.",
+                "effect": "German positions become more chaotic. Some units begin retreating.",
+                "triggers": ["evacuation_routes_change", "german_patrols_reduced"]
+            },
+            {
+                "id": "encirclement_complete",
+                "name": "The Ring Closes",
+                "date": "1942-11-23",
+                "description": "Soviet forces link up at Kalach, trapping 300,000 German soldiers in Stalingrad.",
+                "effect": "Complete chaos in German lines. Many soldiers realize they are doomed.",
+                "triggers": ["escape_window_closes", "german_surrender_talks"]
+            },
+            {
+                "id": "heavy_snowfall",
+                "name": "First Major Snowfall",
+                "date": "1942-11-21",
+                "description": "Heavy snow begins to fall, making movement more difficult but providing cover.",
+                "effect": "Visibility reduced. Cold intensifies. New paths become possible.",
+                "triggers": ["weather_change", "hypothermia_risk"]
+            }
+        ],
+
+        "items": [
+            {
+                "id": "canned_food",
+                "name": "Canned Food",
+                "type": "supply",
+                "description": "Precious canned goods that could sustain you for days.",
+                "locations": ["tractor_factory", "school_4"]
+            },
+            {
+                "id": "warm_coat",
+                "name": "Warm Winter Coat",
+                "type": "clothing",
+                "description": "A heavy coat essential for surviving the Russian winter.",
+                "locations": ["tractor_factory"]
+            },
+            {
+                "id": "medical_kit",
+                "name": "Medical Supplies",
+                "type": "supply",
+                "description": "Bandages, morphine, and basic surgical tools.",
+                "locations": ["riverbank", "tractor_factory"]
+            },
+            {
+                "id": "forged_documents",
+                "name": "Forged Documents",
+                "type": "document",
+                "description": "Papers identifying you as an essential worker with permission to travel.",
+                "obtainedFrom": ["commissar_volkov", "worker_ivan"]
+            },
+            {
+                "id": "military_map",
+                "name": "Military Map",
+                "type": "information",
+                "description": "A map showing current military positions and safe routes.",
+                "obtainedFrom": ["sgt_petrov", "german_deserter"]
+            },
+            {
+                "id": "family_photo",
+                "name": "Family Photograph",
+                "type": "personal",
+                "description": "A photograph of your family from before the war.",
+                "locations": ["grain_elevator"]
+            }
+        ],
+
+        "factions": {
+            "soviet": {
+                "name": "Soviet Forces",
+                "description": "The Red Army defenders of Stalingrad",
+                "attitude": "Will help loyal Soviet citizens, suspicious of strangers"
+            },
+            "german": {
+                "name": "German Forces",
+                "description": "The Wehrmacht 6th Army, besieging the city",
+                "attitude": "Hostile to Soviet civilians, increasingly desperate"
+            },
+            "civilian": {
+                "name": "Civilian Population",
+                "description": "The trapped civilians of Stalingrad",
+                "attitude": "Desperate, will trade for survival, trust must be earned"
+            },
+            "resistance": {
+                "name": "Underground Resistance",
+                "description": "Organized civilian resistance fighters",
+                "attitude": "Secretive, helpful if you prove your loyalty"
+            }
+        },
+
+        "difficultyModifiers": {
+            "easy": {
+                "combatDanger": 0.5,
+                "resourceAvailability": 1.5,
+                "npcDisposition": 20
+            },
+            "normal": {
+                "combatDanger": 1.0,
+                "resourceAvailability": 1.0,
+                "npcDisposition": 0
+            },
+            "hard": {
+                "combatDanger": 1.5,
+                "resourceAvailability": 0.7,
+                "npcDisposition": -15
+            },
+            "realistic": {
+                "combatDanger": 2.0,
+                "resourceAvailability": 0.5,
+                "npcDisposition": -25
+            }
+        }
+    }
+}

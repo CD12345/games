@@ -316,29 +316,55 @@ export class IsometricRenderer {
     }
 
     // Render UI elements (HUD)
-    renderUI(state) {
+    renderUI(state, timeInfo = null) {
         const ctx = this.ctx;
 
-        // Time of day indicator (top right)
+        // Time and date indicator (top right)
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(this.canvas.width - 100, 10, 90, 30);
+        ctx.fillRect(this.canvas.width - 180, 10, 170, timeInfo?.dateString ? 50 : 30);
         ctx.fillStyle = '#fff';
         ctx.font = '14px monospace';
         ctx.textAlign = 'right';
-        const hours = Math.floor(state.world.timeOfDay);
-        const mins = Math.floor((state.world.timeOfDay % 1) * 60);
-        ctx.fillText(
-            `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`,
-            this.canvas.width - 20,
-            30
-        );
 
-        // Phase indicator (top left)
+        // Display time from event system or fallback
+        if (timeInfo) {
+            ctx.fillText(timeInfo.timeString || '12:00 PM', this.canvas.width - 20, 28);
+            if (timeInfo.dateString) {
+                ctx.font = '11px monospace';
+                ctx.fillStyle = '#aaa';
+                ctx.fillText(timeInfo.dateString, this.canvas.width - 20, 48);
+            }
+        } else {
+            const hours = Math.floor(state.world.timeOfDay);
+            const mins = Math.floor((state.world.timeOfDay % 1) * 60);
+            ctx.fillText(
+                `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`,
+                this.canvas.width - 20,
+                28
+            );
+        }
+
+        // Scenario title (top left)
         ctx.textAlign = 'left';
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(10, 10, 120, 30);
-        ctx.fillStyle = '#fff';
-        ctx.fillText(state.phase.toUpperCase(), 20, 30);
+        const scenarioTitle = state.scenario?.title || 'History RPG';
+        const titleWidth = Math.max(150, scenarioTitle.length * 9 + 20);
+        ctx.fillRect(10, 10, titleWidth, 30);
+        ctx.fillStyle = '#c9a227';
+        ctx.font = '14px monospace';
+        ctx.fillText(scenarioTitle, 20, 30);
+
+        // Current objective (below title)
+        if (state.scenario?.goalPath) {
+            const currentObj = state.scenario.goalPath.find(g => !g.completed);
+            if (currentObj) {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(10, 45, 280, 25);
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px monospace';
+                ctx.fillText(`> ${currentObj.objective}`, 20, 62);
+            }
+        }
 
         // Health bar (bottom left)
         if (state.player) {
