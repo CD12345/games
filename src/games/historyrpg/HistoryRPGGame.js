@@ -5,9 +5,12 @@ import { WorldGrid } from './core/WorldGrid.js';
 import { ScenarioManager } from './core/ScenarioManager.js';
 import { EventSystem } from './core/EventSystem.js';
 import { TerrainGenerator } from './core/TerrainGenerator.js';
-import { EntityManager } from './core/EntityManager.js';
+import { EntityManager, ENTITY_TYPES } from './core/EntityManager.js';
+import { QuestManager } from './core/QuestManager.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
 import { DialoguePanel } from './ui/DialoguePanel.js';
+import { JournalPanel } from './ui/JournalPanel.js';
+import { InventoryPanel } from './ui/InventoryPanel.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
 import { ResponseParser } from './ai/ResponseParser.js';
@@ -37,7 +40,12 @@ export class HistoryRPGGame extends GameEngine {
         this.eventSystem = null;
         this.terrainGenerator = null;
         this.entityManager = null;
+        this.questManager = null;
+
+        // UI panels
         this.dialoguePanel = null;
+        this.journalPanel = null;
+        this.inventoryPanel = null;
 
         // AI systems
         this.aiGateway = null;
@@ -74,15 +82,23 @@ export class HistoryRPGGame extends GameEngine {
         // Create renderer
         this.renderer = new IsometricRenderer(this.canvas);
 
-        // Create dialogue panel
+        // Create UI panels
         this.dialoguePanel = new DialoguePanel(this.canvas);
+        this.journalPanel = new JournalPanel(this.canvas);
+        this.inventoryPanel = new InventoryPanel(this.canvas);
         this.setupDialogueCallbacks();
+        this.setupInventoryCallbacks();
 
         // Initialize AI systems
         this.initializeAI();
 
         // Create scenario manager (pass generation queue for AI generation)
         this.scenarioManager = new ScenarioManager(this.generationQueue);
+
+        // Create quest manager (linked to scenario manager)
+        this.questManager = new QuestManager(this.scenarioManager);
+        this.journalPanel.setQuestManager(this.questManager);
+        this.setupQuestCallbacks();
 
         // Create event system (linked to scenario manager)
         this.eventSystem = new EventSystem(this.scenarioManager);
@@ -166,6 +182,44 @@ export class HistoryRPGGame extends GameEngine {
         this.dialoguePanel.onDialogueEnd = () => {
             debugLog(`[HistoryRPG] Dialogue ended`);
             this.endDialogue();
+        };
+    }
+
+    // Set up quest manager callbacks
+    setupQuestCallbacks() {
+        this.questManager.onQuestStarted = (quest) => {
+            this.showNotification(`Quest Started: ${quest.title}`);
+        };
+
+        this.questManager.onQuestCompleted = (quest) => {
+            this.showNotification(`Quest Completed: ${quest.title}`, 'Check your rewards!');
+        };
+
+        this.questManager.onQuestFailed = (quest, reason) => {
+            this.showNotification(`Quest Failed: ${quest.title}`, reason);
+        };
+
+        this.questManager.onObjectiveComplete = (quest, objective) => {
+            this.showNotification('Objective Complete', objective.description);
+        };
+
+        this.questManager.onQuestDiscovered = (quest) => {
+            this.showNotification(`New Quest: ${quest.title}`);
+        };
+    }
+
+    // Set up inventory panel callbacks
+    setupInventoryCallbacks() {
+        this.inventoryPanel.onItemUse = (item) => {
+            this.useItem(item);
+        };
+
+        this.inventoryPanel.onItemDrop = (item) => {
+            this.dropItem(item);
+        };
+
+        this.inventoryPanel.onItemSelect = (item) => {
+            debugLog(`[HistoryRPG] Selected item: ${item.name}`);
         };
     }
 
@@ -308,6 +362,9 @@ export class HistoryRPGGame extends GameEngine {
                 this.loadScenarioNPCs(scenario);
                 debugLog(`[HistoryRPG] NPCs loaded: ${Object.keys(this.state.npcs).length}`);
 
+                // Load quests from scenario
+                this.questManager.loadFromScenario(scenario);
+
                 return;
             } catch (error) {
                 debugLog(`[HistoryRPG] Scenario generation FAILED: ${error.message}`);
@@ -356,6 +413,9 @@ export class HistoryRPGGame extends GameEngine {
 
             // Load NPCs from scenario
             this.loadScenarioNPCs(scenario);
+
+            // Load quests from scenario
+            this.questManager.loadFromScenario(scenario);
 
             return true;
         } catch (error) {
@@ -522,6 +582,49 @@ export class HistoryRPGGame extends GameEngine {
     handleKeyDown(e) {
         this.keys[e.key.toLowerCase()] = true;
 
+        // UI panel keys (when not in dialogue)
+        if (this.state.phase === PHASES.PLAYING) {
+            // J - Toggle Journal
+            if (e.key === 'j' || e.key === 'J') {
+                this.journalPanel.toggle();
+                if (this.journalPanel.isOpen) {
+                    this.inventoryPanel.close();
+                }
+                e.preventDefault();
+                return;
+            }
+
+            // I - Toggle Inventory
+            if (e.key === 'i' || e.key === 'I') {
+                this.inventoryPanel.setInventory(this.state.player.inventory);
+                this.inventoryPanel.toggle();
+                if (this.inventoryPanel.isOpen) {
+                    this.journalPanel.close();
+                }
+                e.preventDefault();
+                return;
+            }
+
+            // E - Interact with nearby entity
+            if (e.key === 'e' || e.key === 'E') {
+                this.interactWithNearby();
+                e.preventDefault();
+                return;
+            }
+        }
+
+        // Close panels with ESC
+        if (e.key === 'Escape') {
+            if (this.journalPanel.isOpen) {
+                this.journalPanel.close();
+                return;
+            }
+            if (this.inventoryPanel.isOpen) {
+                this.inventoryPanel.close();
+                return;
+            }
+        }
+
         // Handle zoom
         if (e.key === '+' || e.key === '=') {
             this.renderer.setZoom(this.renderer.zoom + 0.1);
@@ -529,7 +632,7 @@ export class HistoryRPGGame extends GameEngine {
             this.renderer.setZoom(this.renderer.zoom - 0.1);
         }
 
-        // ESC to pause
+        // ESC to pause (when no panels open)
         if (e.key === 'Escape') {
             if (this.state.phase === PHASES.PLAYING) {
                 this.state.phase = PHASES.PAUSED;
@@ -671,6 +774,11 @@ export class HistoryRPGGame extends GameEngine {
 
             if (dist < 10) {
                 this.scenarioManager.discoverLocation(location.id);
+
+                // Trigger quest progress for "visit" objectives
+                if (this.questManager) {
+                    this.questManager.onPlayerAction('visit', location.id);
+                }
             }
         }
     }
@@ -824,9 +932,22 @@ export class HistoryRPGGame extends GameEngine {
         // Render notifications
         this.renderNotifications();
 
+        // Render interaction hint (if near interactable)
+        this.renderInteractionHint();
+
         // Render dialogue panel (if in dialogue)
         if (this.state.phase === PHASES.DIALOGUE && this.dialoguePanel?.isActive()) {
             this.dialoguePanel.render();
+        }
+
+        // Render journal panel (if open)
+        if (this.journalPanel?.isOpen) {
+            this.journalPanel.render();
+        }
+
+        // Render inventory panel (if open)
+        if (this.inventoryPanel?.isOpen) {
+            this.inventoryPanel.render();
         }
 
         // Render pause overlay
@@ -838,6 +959,50 @@ export class HistoryRPGGame extends GameEngine {
         if (this.state.phase === PHASES.GAME_OVER) {
             this.renderGameOverOverlay();
         }
+
+        // Render keyboard hints
+        this.renderKeyHints();
+    }
+
+    // Render keyboard shortcut hints
+    renderKeyHints() {
+        if (this.state.phase !== PHASES.PLAYING) return;
+        if (this.journalPanel?.isOpen || this.inventoryPanel?.isOpen) return;
+
+        const ctx = this.ctx;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(10, this.canvas.height - 30, 220, 20);
+
+        ctx.fillStyle = '#888';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('[I] Inventory  [J] Journal  [E] Interact', 15, this.canvas.height - 16);
+    }
+
+    // Render interaction hint when near interactable
+    renderInteractionHint() {
+        if (this.state.phase !== PHASES.PLAYING) return;
+        if (!this.state.nearbyInteractables?.length) return;
+
+        const ctx = this.ctx;
+        const entity = this.state.nearbyInteractables[0];
+        const name = entity.name || 'Object';
+
+        // Draw hint above player
+        const screenPos = this.renderer.worldToScreen(
+            this.state.player.position.x,
+            this.state.player.position.y - 1
+        );
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        const text = `[E] ${entity.type === 'npc' ? 'Talk to' : 'Pick up'} ${name}`;
+        const textWidth = ctx.measureText(text).width + 20;
+        ctx.fillRect(screenPos.x - textWidth / 2, screenPos.y - 60, textWidth, 25);
+
+        ctx.fillStyle = '#c9a227';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(text, screenPos.x, screenPos.y - 43);
     }
 
     // Render notification popups
@@ -1249,6 +1414,12 @@ export class HistoryRPGGame extends GameEngine {
 
     // End current dialogue
     endDialogue() {
+        // Trigger quest progress for "talk" objectives
+        if (this.state.currentDialogue && this.questManager) {
+            const npcId = this.state.currentDialogue.npcId;
+            this.questManager.onPlayerAction('talk', npcId);
+        }
+
         // Restore NPC state from 'talk' to 'idle'
         if (this.state.currentDialogue && this.entityManager) {
             const npcId = this.state.currentDialogue.npcId;
@@ -1269,6 +1440,160 @@ export class HistoryRPGGame extends GameEngine {
             generating: this.state.aiGenerating,
             queueStatus: this.generationQueue?.getStatus() || null
         };
+    }
+
+    // Interact with nearest entity (NPC or item)
+    interactWithNearby() {
+        if (!this.entityManager) return;
+
+        const nearby = this.entityManager.getInteractablesNear(
+            this.state.player.position.x,
+            this.state.player.position.y,
+            2
+        );
+
+        if (nearby.length === 0) {
+            debugLog('[HistoryRPG] Nothing nearby to interact with');
+            return;
+        }
+
+        const entity = nearby[0]; // Closest entity
+
+        if (entity.type === ENTITY_TYPES.NPC) {
+            this.startDialogue(entity.id);
+        } else if (entity.type === ENTITY_TYPES.ITEM) {
+            this.pickupItem(entity);
+        }
+    }
+
+    // Pick up an item
+    pickupItem(itemEntity) {
+        if (!itemEntity || !itemEntity.pickupable) return;
+
+        // Add to player inventory
+        const item = {
+            id: itemEntity.id,
+            name: itemEntity.name,
+            description: itemEntity.description,
+            itemType: itemEntity.itemType,
+            type: itemEntity.itemType,
+            quantity: itemEntity.quantity || 1,
+            value: itemEntity.value || 0,
+            weight: itemEntity.weight || 0,
+            questItem: itemEntity.questItem || false
+        };
+
+        this.state.player.inventory.push(item);
+
+        // Remove from world
+        this.entityManager.removeEntity(itemEntity.id);
+
+        // Show notification
+        this.showNotification(`Picked up: ${item.name}`, item.description);
+
+        // Quest progress
+        if (this.questManager) {
+            this.questManager.onPlayerAction('pickup', itemEntity.id);
+        }
+
+        debugLog(`[HistoryRPG] Picked up item: ${item.name}`);
+    }
+
+    // Use an item from inventory
+    useItem(item) {
+        if (!item) return;
+
+        debugLog(`[HistoryRPG] Using item: ${item.name}`);
+
+        // Handle different item types
+        switch (item.itemType || item.type) {
+            case 'supply':
+                // Restore health
+                const healAmount = item.value || 20;
+                this.state.player.health = Math.min(
+                    this.state.player.maxHealth,
+                    this.state.player.health + healAmount
+                );
+                this.showNotification(`Used ${item.name}`, `+${healAmount} health`);
+                this.removeItemFromInventory(item);
+                break;
+
+            case 'document':
+                // Read document (add to knowledge)
+                if (item.knowledge && !this.state.player.knowledge.includes(item.knowledge)) {
+                    this.state.player.knowledge.push(item.knowledge);
+                    this.showNotification(`Read: ${item.name}`, 'Gained new knowledge');
+                } else {
+                    this.showNotification(`${item.name}`, item.description || 'A document');
+                }
+                break;
+
+            case 'quest':
+                // Quest items typically can't be used directly
+                this.showNotification(item.name, 'This item is needed for a quest');
+                break;
+
+            default:
+                this.showNotification(item.name, item.description || 'Cannot use this item');
+        }
+    }
+
+    // Drop an item from inventory
+    dropItem(item) {
+        if (!item) return;
+
+        // Prevent dropping quest items
+        if (item.questItem || item.itemType === 'quest') {
+            this.showNotification('Cannot drop', 'Quest items cannot be dropped');
+            return;
+        }
+
+        // Remove from inventory
+        const removed = this.removeItemFromInventory(item);
+        if (!removed) return;
+
+        // Create item entity at player position
+        if (this.entityManager) {
+            const itemEntity = this.entityManager.createItem(
+                {
+                    id: `dropped_${item.id}_${Date.now()}`,
+                    name: item.name,
+                    description: item.description,
+                    type: item.itemType || item.type,
+                    quantity: item.quantity || 1,
+                    value: item.value || 0,
+                    weight: item.weight || 0
+                },
+                Math.floor(this.state.player.position.x),
+                Math.floor(this.state.player.position.y)
+            );
+        }
+
+        this.showNotification(`Dropped: ${item.name}`);
+        debugLog(`[HistoryRPG] Dropped item: ${item.name}`);
+    }
+
+    // Remove item from player inventory
+    removeItemFromInventory(item) {
+        const index = this.state.player.inventory.findIndex(i => i.id === item.id);
+        if (index === -1) return false;
+
+        // If stackable and quantity > 1, reduce quantity
+        if (item.quantity > 1) {
+            this.state.player.inventory[index].quantity--;
+            if (this.state.player.inventory[index].quantity <= 0) {
+                this.state.player.inventory.splice(index, 1);
+            }
+        } else {
+            this.state.player.inventory.splice(index, 1);
+        }
+
+        // Update inventory panel if open
+        if (this.inventoryPanel.isOpen) {
+            this.inventoryPanel.setInventory(this.state.player.inventory);
+        }
+
+        return true;
     }
 
     destroy() {
