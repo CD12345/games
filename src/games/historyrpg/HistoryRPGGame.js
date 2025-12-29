@@ -7,6 +7,7 @@ import { EventSystem } from './core/EventSystem.js';
 import { TerrainGenerator } from './core/TerrainGenerator.js';
 import { EntityManager } from './core/EntityManager.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
+import { DialoguePanel } from './ui/DialoguePanel.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
 import { ResponseParser } from './ai/ResponseParser.js';
@@ -36,6 +37,7 @@ export class HistoryRPGGame extends GameEngine {
         this.eventSystem = null;
         this.terrainGenerator = null;
         this.entityManager = null;
+        this.dialoguePanel = null;
 
         // AI systems
         this.aiGateway = null;
@@ -71,6 +73,10 @@ export class HistoryRPGGame extends GameEngine {
 
         // Create renderer
         this.renderer = new IsometricRenderer(this.canvas);
+
+        // Create dialogue panel
+        this.dialoguePanel = new DialoguePanel(this.canvas);
+        this.setupDialogueCallbacks();
 
         // Initialize AI systems
         this.initializeAI();
@@ -147,6 +153,19 @@ export class HistoryRPGGame extends GameEngine {
 
         this.eventSystem.onTimeChange = (timeInfo) => {
             this.state.world.timeOfDay = timeInfo.hour + timeInfo.minute / 60;
+        };
+    }
+
+    // Set up dialogue panel callbacks
+    setupDialogueCallbacks() {
+        this.dialoguePanel.onChoiceSelected = async (choice) => {
+            debugLog(`[HistoryRPG] Player chose: ${choice.text}`);
+            await this.continueDialogue(choice.text);
+        };
+
+        this.dialoguePanel.onDialogueEnd = () => {
+            debugLog(`[HistoryRPG] Dialogue ended`);
+            this.endDialogue();
         };
     }
 
@@ -563,6 +582,15 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     update(deltaTime) {
+        // Handle dialogue phase separately
+        if (this.state.phase === PHASES.DIALOGUE) {
+            // Update dialogue panel animation (text reveal)
+            if (this.dialoguePanel) {
+                this.dialoguePanel.update(deltaTime);
+            }
+            return;
+        }
+
         if (this.state.phase !== PHASES.PLAYING) {
             return;
         }
@@ -796,6 +824,11 @@ export class HistoryRPGGame extends GameEngine {
         // Render notifications
         this.renderNotifications();
 
+        // Render dialogue panel (if in dialogue)
+        if (this.state.phase === PHASES.DIALOGUE && this.dialoguePanel?.isActive()) {
+            this.dialoguePanel.render();
+        }
+
         // Render pause overlay
         if (this.state.phase === PHASES.PAUSED) {
             this.renderPauseOverlay();
@@ -990,6 +1023,14 @@ export class HistoryRPGGame extends GameEngine {
             this.scenarioManager.meetNPC(npcId);
         }
 
+        // Set NPC to talk state if using entity manager
+        if (this.entityManager) {
+            const entity = this.entityManager.getEntity(npcId);
+            if (entity) {
+                entity.setState('talk');
+            }
+        }
+
         // If AI is available, generate dynamic greeting
         if (this.aiGateway.isAvailable()) {
             try {
@@ -1013,10 +1054,12 @@ export class HistoryRPGGame extends GameEngine {
                     history: []
                 };
 
+                // Start dialogue panel
+                this.dialoguePanel.startDialogue(npc, response);
                 this.state.phase = PHASES.DIALOGUE;
-                console.log('[HistoryRPG] Started dialogue with', npc.name);
+                debugLog(`[HistoryRPG] Started AI dialogue with ${npc.name}`);
             } catch (error) {
-                console.error('[HistoryRPG] Failed to generate dialogue:', error);
+                debugLog(`[HistoryRPG] Failed to generate dialogue: ${error.message}`);
                 this.startFallbackDialogue(npc);
             }
         } else {
@@ -1026,20 +1069,67 @@ export class HistoryRPGGame extends GameEngine {
 
     // Fallback dialogue when AI is unavailable
     startFallbackDialogue(npc) {
+        const response = {
+            speech: this.getFallbackGreeting(npc),
+            emotion: npc.disposition > 50 ? 'friendly' : 'suspicious',
+            suggestedChoices: this.getFallbackChoices(npc)
+        };
+
         this.state.currentDialogue = {
             npcId: npc.id,
             npc,
-            response: {
-                speech: `${npc.name} looks at you cautiously. "What do you want?"`,
-                emotion: 'suspicious',
-                suggestedChoices: [
-                    { text: "I need help.", type: "friendly" },
-                    { text: "Never mind.", type: "leaving" }
-                ]
-            },
+            response,
             history: []
         };
+
+        // Start dialogue panel
+        this.dialoguePanel.startDialogue(npc, response);
         this.state.phase = PHASES.DIALOGUE;
+        debugLog(`[HistoryRPG] Started fallback dialogue with ${npc.name}`);
+    }
+
+    // Get fallback greeting based on NPC personality
+    getFallbackGreeting(npc) {
+        const greetings = {
+            friendly: [
+                `${npc.name} nods at you. "Comrade, what brings you here?"`,
+                `${npc.name} looks relieved to see another survivor. "Thank God, a friendly face."`,
+                `"Welcome," says ${npc.name}. "It's dangerous to be out alone."`
+            ],
+            neutral: [
+                `${npc.name} looks at you cautiously. "What do you want?"`,
+                `${npc.name} eyes you warily. "State your business."`,
+                `"You're not from around here," ${npc.name} observes.`
+            ],
+            hostile: [
+                `${npc.name} glares at you. "Get out of my sight."`,
+                `${npc.name} backs away defensively. "Stay back!"`,
+                `"I don't trust strangers," ${npc.name} growls.`
+            ]
+        };
+
+        let mood = 'neutral';
+        if (npc.disposition > 60) mood = 'friendly';
+        else if (npc.disposition < 30) mood = 'hostile';
+
+        const options = greetings[mood];
+        return options[Math.floor(Math.random() * options.length)];
+    }
+
+    // Get fallback dialogue choices based on NPC
+    getFallbackChoices(npc) {
+        const choices = [
+            { text: "I need help finding supplies.", type: "friendly" },
+            { text: "What can you tell me about this area?", type: "neutral" }
+        ];
+
+        if (npc.canProvide?.includes('directions') || npc.knowledge?.length > 0) {
+            choices.push({ text: "Do you know a way out of the city?", type: "neutral" });
+        }
+
+        choices.push({ text: "I should go.", type: "leaving" });
+
+        return choices;
     }
 
     // Continue dialogue with player input
@@ -1051,6 +1141,8 @@ export class HistoryRPGGame extends GameEngine {
         // Add to history
         history.push({ speaker: 'player', text: playerInput });
 
+        let response;
+
         if (this.aiGateway.isAvailable()) {
             try {
                 const context = {
@@ -1060,7 +1152,7 @@ export class HistoryRPGGame extends GameEngine {
                     playerRole: this.state.player.characterType || 'civilian'
                 };
 
-                const response = await this.generationQueue.generateDialogue(
+                response = await this.generationQueue.generateDialogue(
                     npc,
                     playerInput,
                     context
@@ -1071,6 +1163,14 @@ export class HistoryRPGGame extends GameEngine {
                     npc.disposition = Math.max(0, Math.min(100,
                         npc.disposition + response.dispositionChange
                     ));
+
+                    // Update entity disposition if using entity manager
+                    if (this.entityManager) {
+                        const entity = this.entityManager.getEntity(npc.id);
+                        if (entity) {
+                            entity.disposition = npc.disposition;
+                        }
+                    }
                 }
 
                 // Add revealed information to player knowledge
@@ -1082,17 +1182,82 @@ export class HistoryRPGGame extends GameEngine {
                     }
                 }
 
-                this.state.currentDialogue.response = response;
-                history.push({ speaker: npc.name, text: response.speech });
-
             } catch (error) {
                 console.error('[HistoryRPG] Failed to continue dialogue:', error);
+                response = this.getFallbackResponse(npc, playerInput);
             }
+        } else {
+            response = this.getFallbackResponse(npc, playerInput);
         }
+
+        // Update dialogue state
+        this.state.currentDialogue.response = response;
+        history.push({ speaker: npc.name, text: response.speech });
+
+        // Update dialogue panel with new response
+        this.dialoguePanel.updateDialogue(response);
+    }
+
+    // Get fallback response when AI is unavailable
+    getFallbackResponse(npc, playerInput) {
+        const lowerInput = playerInput.toLowerCase();
+
+        // Simple keyword matching for fallback responses
+        if (lowerInput.includes('supplies') || lowerInput.includes('food')) {
+            return {
+                speech: `${npc.name} shakes their head. "Supplies are scarce. Everyone is looking for food and water."`,
+                emotion: 'concerned',
+                suggestedChoices: [
+                    { text: "Where might I find some?", type: "neutral" },
+                    { text: "Thank you anyway.", type: "friendly" },
+                    { text: "I should go.", type: "leaving" }
+                ]
+            };
+        }
+
+        if (lowerInput.includes('area') || lowerInput.includes('tell me')) {
+            return {
+                speech: `${npc.name} looks around warily. "This area is dangerous. The fighting has destroyed most buildings. Stay low and avoid open streets."`,
+                emotion: 'cautious',
+                suggestedChoices: [
+                    { text: "Is there anywhere safe?", type: "neutral" },
+                    { text: "What about the soldiers?", type: "neutral" },
+                    { text: "I should go.", type: "leaving" }
+                ]
+            };
+        }
+
+        if (lowerInput.includes('way out') || lowerInput.includes('escape')) {
+            return {
+                speech: `${npc.name} lowers their voice. "The river might be a way out, but it's heavily watched. I've heard rumors of tunnels, but I don't know where."`,
+                emotion: 'secretive',
+                suggestedChoices: [
+                    { text: "Who would know about the tunnels?", type: "neutral" },
+                    { text: "Thank you for the information.", type: "friendly" },
+                    { text: "I should go.", type: "leaving" }
+                ]
+            };
+        }
+
+        // Default response
+        return {
+            speech: `${npc.name} nods slowly. "Times are hard for everyone. We do what we can to survive."`,
+            emotion: 'neutral',
+            suggestedChoices: this.getFallbackChoices(npc)
+        };
     }
 
     // End current dialogue
     endDialogue() {
+        // Restore NPC state from 'talk' to 'idle'
+        if (this.state.currentDialogue && this.entityManager) {
+            const npcId = this.state.currentDialogue.npcId;
+            const entity = this.entityManager.getEntity(npcId);
+            if (entity && entity.state === 'talk') {
+                entity.setState('idle');
+            }
+        }
+
         this.state.currentDialogue = null;
         this.state.phase = PHASES.PLAYING;
     }
