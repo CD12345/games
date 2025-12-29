@@ -4,6 +4,7 @@ import { GameEngine } from '../../engine/GameEngine.js';
 import { WorldGrid } from './core/WorldGrid.js';
 import { ScenarioManager } from './core/ScenarioManager.js';
 import { EventSystem } from './core/EventSystem.js';
+import { TerrainGenerator } from './core/TerrainGenerator.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
@@ -32,6 +33,7 @@ export class HistoryRPGGame extends GameEngine {
         this.renderer = null;
         this.scenarioManager = null;
         this.eventSystem = null;
+        this.terrainGenerator = null;
 
         // AI systems
         this.aiGateway = null;
@@ -57,6 +59,10 @@ export class HistoryRPGGame extends GameEngine {
     async initialize() {
         // Create world grid
         this.worldGrid = new WorldGrid();
+
+        // Create terrain generator with seeded randomness
+        const terrainSeed = this.gameCode ? this.gameCode.charCodeAt(0) * 1000 : 12345;
+        this.terrainGenerator = new TerrainGenerator(terrainSeed);
 
         // Create renderer
         this.renderer = new IsometricRenderer(this.canvas);
@@ -435,23 +441,44 @@ export class HistoryRPGGame extends GameEngine {
 
     generateInitialWorld() {
         // Generate chunks around the starting position
-        const startX = 128;
-        const startY = 128;
+        const startX = this.state.player.position.x || 128;
+        const startY = this.state.player.position.y || 128;
 
-        // Set player start position
-        this.state.player.position = { x: startX, y: startY };
+        debugLog(`[HistoryRPG] Generating initial world around (${startX}, ${startY})`);
 
-        // Generate nearby chunks with placeholder terrain
+        // Generate nearby chunks with terrain generator
         const chunks = this.worldGrid.getRequiredChunks(startX, startY, 3);
 
         for (const chunk of chunks) {
             if (!this.worldGrid.isChunkGenerated(chunk.cx, chunk.cy)) {
-                this.worldGrid.generatePlaceholderChunk(chunk.cx, chunk.cy, 12345);
+                this.generateChunk(chunk.cx, chunk.cy);
             }
+        }
+
+        // Apply scenario locations if available
+        if (this.state.scenario && this.terrainGenerator) {
+            this.terrainGenerator.applyScenarioLocations(this.worldGrid, this.state.scenario);
         }
 
         // Update visibility
         this.worldGrid.updateVisibility(startX, startY, 12);
+
+        debugLog(`[HistoryRPG] Initial world generated - ${chunks.length} chunks`);
+    }
+
+    // Generate a single chunk using terrain generator
+    generateChunk(cx, cy) {
+        if (!this.terrainGenerator) {
+            // Fallback to placeholder
+            this.worldGrid.generatePlaceholderChunk(cx, cy, 12345);
+            return;
+        }
+
+        const tileData = this.terrainGenerator.generateChunk(cx, cy, {
+            scenario: this.state.scenario
+        });
+
+        this.worldGrid.setChunkTiles(cx, cy, tileData);
     }
 
     setupInputHandlers() {
@@ -693,9 +720,8 @@ export class HistoryRPGGame extends GameEngine {
 
         for (const chunk of chunks) {
             if (!this.worldGrid.isChunkGenerated(chunk.cx, chunk.cy)) {
-                // Generate placeholder for now
-                // TODO: Queue AI generation for detailed terrain
-                this.worldGrid.generatePlaceholderChunk(chunk.cx, chunk.cy, 12345);
+                // Generate chunk with terrain generator
+                this.generateChunk(chunk.cx, chunk.cy);
             }
         }
     }

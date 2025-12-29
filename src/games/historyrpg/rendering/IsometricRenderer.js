@@ -2,18 +2,19 @@
 // 2.5D rendering with blocky Minecraft-style tiles
 
 import { ISO, TILE_TYPES, LOD, CHUNK_SIZE } from '../config.js';
+import { TileFactory } from './TileFactory.js';
 
-// Tile color palettes (Minecraft-style blocky aesthetic)
-const TILE_PALETTES = {
-    [TILE_TYPES.EMPTY]: { top: '#1a1a2e', left: '#0f0f1a', right: '#141425' },
-    [TILE_TYPES.GROUND]: { top: '#5a4a3a', left: '#3a3028', right: '#4a3f32' },
-    [TILE_TYPES.RUBBLE]: { top: '#6b5b4a', left: '#4a3f34', right: '#5a4f40' },
-    [TILE_TYPES.WALL]: { top: '#8b7b6a', left: '#5a4f40', right: '#6b5b4a' },
-    [TILE_TYPES.FLOOR]: { top: '#4a4a4a', left: '#3a3a3a', right: '#404040' },
-    [TILE_TYPES.SNOW]: { top: '#ffffff', left: '#cccccc', right: '#e0e0e0' },
-    [TILE_TYPES.WATER]: { top: '#4488aa', left: '#336688', right: '#3377aa' },
-    [TILE_TYPES.ROAD]: { top: '#555555', left: '#444444', right: '#4a4a4a' },
-    [TILE_TYPES.BUILDING]: { top: '#7a6a5a', left: '#4a4038', right: '#5a5048' }
+// Minimap colors (simpler than full tile palettes)
+const MINIMAP_COLORS = {
+    [TILE_TYPES.EMPTY]: '#1a1a2e',
+    [TILE_TYPES.GROUND]: '#5a4a3a',
+    [TILE_TYPES.RUBBLE]: '#6b5b4a',
+    [TILE_TYPES.WALL]: '#8b7b6a',
+    [TILE_TYPES.FLOOR]: '#4a4a4a',
+    [TILE_TYPES.SNOW]: '#ffffff',
+    [TILE_TYPES.WATER]: '#4488aa',
+    [TILE_TYPES.ROAD]: '#555555',
+    [TILE_TYPES.BUILDING]: '#7a6a5a'
 };
 
 export class IsometricRenderer {
@@ -31,78 +32,11 @@ export class IsometricRenderer {
         this.cameraY = 0;
         this.zoom = 1;
 
-        // Pre-rendered tile sprites
-        this.tileCache = new Map();
+        // Tile factory for sprite generation
+        this.tileFactory = new TileFactory();
 
-        // Generate base tile sprites
-        this.generateTileSprites();
-    }
-
-    // Generate pre-rendered sprites for each tile type and height
-    generateTileSprites() {
-        for (const [typeStr, palette] of Object.entries(TILE_PALETTES)) {
-            const type = parseInt(typeStr);
-            for (let height = 0; height <= 4; height++) {
-                const key = `${type}_${height}`;
-                this.tileCache.set(key, this.createTileSprite(palette, height));
-            }
-        }
-    }
-
-    // Create a single tile sprite (isometric block)
-    createTileSprite(palette, height) {
-        const w = this.tileWidth;
-        const h = this.tileHeight + height * this.tileDepth;
-
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = w;
-        offCanvas.height = h + this.tileHeight; // Extra space for height
-        const ctx = offCanvas.getContext('2d');
-
-        const halfW = w / 2;
-        const halfH = this.tileHeight / 2;
-        const depth = height * this.tileDepth;
-
-        // Top face (diamond/rhombus)
-        ctx.fillStyle = palette.top;
-        ctx.beginPath();
-        ctx.moveTo(halfW, 0);
-        ctx.lineTo(w, halfH);
-        ctx.lineTo(halfW, this.tileHeight);
-        ctx.lineTo(0, halfH);
-        ctx.closePath();
-        ctx.fill();
-
-        // Add subtle grid lines on top
-        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        if (height > 0) {
-            // Left face
-            ctx.fillStyle = palette.left;
-            ctx.beginPath();
-            ctx.moveTo(0, halfH);
-            ctx.lineTo(halfW, this.tileHeight);
-            ctx.lineTo(halfW, this.tileHeight + depth);
-            ctx.lineTo(0, halfH + depth);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-
-            // Right face
-            ctx.fillStyle = palette.right;
-            ctx.beginPath();
-            ctx.moveTo(halfW, this.tileHeight);
-            ctx.lineTo(w, halfH);
-            ctx.lineTo(w, halfH + depth);
-            ctx.lineTo(halfW, this.tileHeight + depth);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-        }
-
-        return offCanvas;
+        // Pre-generate common sprites
+        this.tileFactory.pregenerate();
     }
 
     // Convert world coordinates to screen coordinates
@@ -216,10 +150,10 @@ export class IsometricRenderer {
     renderTile(x, y, type, height, visibility) {
         const screen = this.worldToScreen(x, y, height);
 
-        // Get cached sprite
+        // Get sprite from factory with position-based variation
         const cacheHeight = Math.min(height, 4);
-        const key = `${type}_${cacheHeight}`;
-        const sprite = this.tileCache.get(key);
+        const variation = this.tileFactory.getVariation(x, y);
+        const sprite = this.tileFactory.getTileSprite(type, cacheHeight, variation);
 
         if (!sprite) return;
 
@@ -397,51 +331,68 @@ export class IsometricRenderer {
     // Render minimap
     renderMinimap(worldGrid, playerPos, size = 150) {
         const ctx = this.ctx;
-        const x = this.canvas.width - size - 10;
-        const y = this.canvas.height - size - 10;
+        const mapX = this.canvas.width - size - 10;
+        const mapY = this.canvas.height - size - 10;
 
         // Background
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(x - 5, y - 5, size + 10, size + 10);
+        ctx.fillRect(mapX - 5, mapY - 5, size + 10, size + 10);
 
-        // Calculate scale
-        const scale = size / Math.max(worldGrid.width, worldGrid.height);
+        // Calculate visible area around player (not the whole map)
+        const viewRadius = 40;
+        const centerX = playerPos?.x || 128;
+        const centerY = playerPos?.y || 128;
+        const pixelPerTile = size / (viewRadius * 2);
 
-        // Draw explored tiles
-        for (let ty = 0; ty < worldGrid.height; ty++) {
-            for (let tx = 0; tx < worldGrid.width; tx++) {
-                if (worldGrid.isExplored(tx, ty)) {
-                    const type = worldGrid.getTile(tx, ty);
-                    const palette = TILE_PALETTES[type] || TILE_PALETTES[TILE_TYPES.GROUND];
+        // Draw explored tiles in visible area
+        for (let dy = -viewRadius; dy <= viewRadius; dy++) {
+            for (let dx = -viewRadius; dx <= viewRadius; dx++) {
+                const tx = Math.floor(centerX + dx);
+                const ty = Math.floor(centerY + dy);
 
-                    ctx.fillStyle = palette.top;
-                    ctx.fillRect(
-                        x + tx * scale,
-                        y + ty * scale,
-                        Math.max(1, scale),
-                        Math.max(1, scale)
-                    );
-                }
+                if (tx < 0 || tx >= worldGrid.width || ty < 0 || ty >= worldGrid.height) continue;
+                if (!worldGrid.isExplored(tx, ty)) continue;
+
+                const type = worldGrid.getTile(tx, ty);
+                const color = MINIMAP_COLORS[type] || MINIMAP_COLORS[TILE_TYPES.GROUND];
+
+                // Dim unexplored areas
+                const visibility = worldGrid.getVisibility(tx, ty);
+                ctx.globalAlpha = visibility === 2 ? 1 : 0.5;
+
+                ctx.fillStyle = color;
+                ctx.fillRect(
+                    mapX + (dx + viewRadius) * pixelPerTile,
+                    mapY + (dy + viewRadius) * pixelPerTile,
+                    Math.ceil(pixelPerTile),
+                    Math.ceil(pixelPerTile)
+                );
             }
         }
 
-        // Draw player position
-        if (playerPos) {
-            ctx.fillStyle = '#3498db';
-            ctx.beginPath();
-            ctx.arc(
-                x + playerPos.x * scale,
-                y + playerPos.y * scale,
-                4,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-        }
+        ctx.globalAlpha = 1;
+
+        // Draw player position (center)
+        ctx.fillStyle = '#3498db';
+        ctx.beginPath();
+        ctx.arc(
+            mapX + size / 2,
+            mapY + size / 2,
+            4,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
 
         // Border
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x, y, size, size);
+        ctx.strokeStyle = '#c9a227';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mapX, mapY, size, size);
+
+        // Direction indicator (N)
+        ctx.fillStyle = '#c9a227';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('N', mapX + size / 2, mapY - 5);
     }
 }
