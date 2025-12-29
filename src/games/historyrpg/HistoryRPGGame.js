@@ -7,7 +7,9 @@ import { EventSystem } from './core/EventSystem.js';
 import { TerrainGenerator } from './core/TerrainGenerator.js';
 import { EntityManager, ENTITY_TYPES } from './core/EntityManager.js';
 import { QuestManager } from './core/QuestManager.js';
+import { CutsceneManager, CUTSCENE_TRIGGERS } from './core/CutsceneManager.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
+import { CutsceneRenderer } from './rendering/CutsceneRenderer.js';
 import { DialoguePanel } from './ui/DialoguePanel.js';
 import { JournalPanel } from './ui/JournalPanel.js';
 import { InventoryPanel } from './ui/InventoryPanel.js';
@@ -41,6 +43,10 @@ export class HistoryRPGGame extends GameEngine {
         this.terrainGenerator = null;
         this.entityManager = null;
         this.questManager = null;
+        this.cutsceneManager = null;
+
+        // Renderers
+        this.cutsceneRenderer = null;
 
         // UI panels
         this.dialoguePanel = null;
@@ -100,6 +106,11 @@ export class HistoryRPGGame extends GameEngine {
         this.journalPanel.setQuestManager(this.questManager);
         this.setupQuestCallbacks();
 
+        // Create cutscene system
+        this.cutsceneRenderer = new CutsceneRenderer(this.canvas);
+        this.cutsceneManager = new CutsceneManager(this.cutsceneRenderer);
+        this.setupCutsceneCallbacks();
+
         // Create event system (linked to scenario manager)
         this.eventSystem = new EventSystem(this.scenarioManager);
 
@@ -127,6 +138,11 @@ export class HistoryRPGGame extends GameEngine {
 
         // Transition to playing state
         this.state.phase = PHASES.PLAYING;
+
+        // Trigger intro cutscene
+        if (this.cutsceneManager) {
+            this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.GAME_START);
+        }
 
         console.log('[HistoryRPG] Initialized');
     }
@@ -220,6 +236,25 @@ export class HistoryRPGGame extends GameEngine {
 
         this.inventoryPanel.onItemSelect = (item) => {
             debugLog(`[HistoryRPG] Selected item: ${item.name}`);
+        };
+    }
+
+    // Set up cutscene manager callbacks
+    setupCutsceneCallbacks() {
+        this.cutsceneManager.onCutsceneStart = (cutscene) => {
+            debugLog(`[HistoryRPG] Cutscene started: ${cutscene?.title}`);
+            this.state.phase = PHASES.CUTSCENE;
+            this.state.currentCutscene = cutscene;
+        };
+
+        this.cutsceneManager.onCutsceneEnd = (cutscene) => {
+            debugLog(`[HistoryRPG] Cutscene ended: ${cutscene?.title}`);
+            this.state.currentCutscene = null;
+
+            // Only return to playing if no more cutscenes pending
+            if (!this.cutsceneManager.isPlaying()) {
+                this.state.phase = PHASES.PLAYING;
+            }
         };
     }
 
@@ -582,6 +617,14 @@ export class HistoryRPGGame extends GameEngine {
     handleKeyDown(e) {
         this.keys[e.key.toLowerCase()] = true;
 
+        // Handle cutscene input
+        if (this.state.phase === PHASES.CUTSCENE && this.cutsceneManager) {
+            if (this.cutsceneManager.handleInput(e.key)) {
+                e.preventDefault();
+                return;
+            }
+        }
+
         // UI panel keys (when not in dialogue)
         if (this.state.phase === PHASES.PLAYING) {
             // J - Toggle Journal
@@ -685,6 +728,14 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     update(deltaTime) {
+        // Handle cutscene phase
+        if (this.state.phase === PHASES.CUTSCENE) {
+            if (this.cutsceneManager) {
+                this.cutsceneManager.update(deltaTime);
+            }
+            return;
+        }
+
         // Handle dialogue phase separately
         if (this.state.phase === PHASES.DIALOGUE) {
             // Update dialogue panel animation (text reveal)
@@ -778,6 +829,11 @@ export class HistoryRPGGame extends GameEngine {
                 // Trigger quest progress for "visit" objectives
                 if (this.questManager) {
                     this.questManager.onPlayerAction('visit', location.id);
+                }
+
+                // Trigger location cutscene if any
+                if (this.cutsceneManager) {
+                    this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.LOCATION, location.id);
                 }
             }
         }
@@ -888,6 +944,12 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     render() {
+        // Render cutscene if in cutscene phase
+        if (this.state.phase === PHASES.CUTSCENE && this.cutsceneManager?.isPlaying()) {
+            this.cutsceneManager.render();
+            return;
+        }
+
         // Render world with player data (for facing direction, etc)
         const playerData = {
             ...this.state.player.position,
@@ -1183,9 +1245,19 @@ export class HistoryRPGGame extends GameEngine {
         if (!npc) return;
 
         // Mark as met in both local state and scenario manager
+        const firstMeeting = !npc.met;
         npc.met = true;
         if (this.scenarioManager) {
             this.scenarioManager.meetNPC(npcId);
+        }
+
+        // Check for NPC meet cutscene (only on first meeting)
+        if (firstMeeting && this.cutsceneManager) {
+            this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.NPC_MEET, npcId);
+            // If cutscene started, it will handle its own flow
+            if (this.cutsceneManager.isPlaying()) {
+                return; // Cutscene will end and then we can talk to NPC
+            }
         }
 
         // Set NPC to talk state if using entity manager
