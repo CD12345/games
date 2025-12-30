@@ -23,6 +23,7 @@ import './games/hextd/index.js';
 import './games/corridorchase/index.js';
 import './games/patternmatch/index.js';
 import './games/claimterritory/index.js';
+import './games/stackrace/index.js';
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');

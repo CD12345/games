@@ -18,7 +18,7 @@ Inspired by Gigamic's modern classics like Qoridor, Quarto, and Pylos, these gam
 - ✅ **Corridor Chase** - Implemented
 - ✅ **Pattern Match** - Implemented
 - ✅ **Claim Territory** - Implemented
-- ⏳ **Stack Race** - Not yet implemented
+- ✅ **Stack Race** - Implemented
 - ⏳ **Slide Puzzle Battle** - Not yet implemented
 - ⏳ **Connection** - Not yet implemented
 - ⏳ **Tug of War Line** - Not yet implemented
