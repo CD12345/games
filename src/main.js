@@ -27,6 +27,7 @@ import './games/liquidwar/index.js';
 import './games/hextd/index.js';
 import './games/corridorchase/index.js';
 import './games/patternmatch/index.js';
+import './games/claimterritory/index.js';
 
 // DOM Elements
 const screens = {

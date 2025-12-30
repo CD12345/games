@@ -17,7 +17,7 @@ Inspired by Gigamic's modern classics like Qoridor, Quarto, and Pylos, these gam
 
 - ✅ **Corridor Chase** - Implemented
 - ✅ **Pattern Match** - Implemented
-- ⏳ **Claim Territory** - Not yet implemented
+- ✅ **Claim Territory** - Implemented
 - ⏳ **Stack Race** - Not yet implemented
 - ⏳ **Slide Puzzle Battle** - Not yet implemented
 - ⏳ **Connection** - Not yet implemented
@@ -87,7 +87,9 @@ Inspired by Gigamic's modern classics like Qoridor, Quarto, and Pylos, these gam
 
 ---
 
-## 3. Claim Territory
+## 3. Claim Territory ✅
+
+**Status**: Implemented
 
 **Rules**:
 - Shared 10x10 grid, both players start at opposite corners
