@@ -29,6 +29,7 @@ import './games/corridorchase/index.js';
 import './games/patternmatch/index.js';
 import './games/claimterritory/index.js';
 import './games/stackrace/index.js';
+import './games/slidepuzzle/index.js';
 
 // DOM Elements
 const screens = {
