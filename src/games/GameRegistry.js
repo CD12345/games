@@ -27,6 +27,7 @@ export const GameRegistry = {
             getPreview: config.getPreview || null,
             supportsAI: config.supportsAI || false,
             debugOnly: config.debugOnly || false,
+            hasLoadingScreen: config.hasLoadingScreen || false,
             settings: config.settings || []
         });
     },
