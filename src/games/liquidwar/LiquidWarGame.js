@@ -143,6 +143,14 @@ export class LiquidWarGame extends GameEngine {
             this.network.onInputUpdate = (input) => {
                 // Guest sends their cursor position (p2)
                 if (input?.cursorX !== undefined && input?.cursorY !== undefined) {
+                    // If p2 was AI but now a human connected, switch them to human
+                    if (this.aiPlayers.has('p2')) {
+                        debugLog('Human player connected as p2, removing AI control');
+                        this.aiPlayers.delete('p2');
+                        this.humanPlayers.add('p2');
+                        delete this.state.aiPlayers['p2'];
+                        delete this.aiState['p2'];
+                    }
                     this.state.cursors.p2 = {
                         x: input.cursorX,
                         y: input.cursorY,
