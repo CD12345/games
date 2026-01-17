@@ -13,7 +13,7 @@ import {
 import { GameRegistry } from './games/GameRegistry.js';
 import { ResponsiveCanvas } from './ui/responsive.js';
 import { PONG_CONFIG } from './games/pong/config.js';
-import { getBasePath } from './ui/url.js';
+import { getBasePath, getEntryPath } from './ui/url.js';
 
 // Import games
 import './games/pong/index.js';
@@ -260,13 +260,19 @@ function returnToMenu(notifyPeer = true) {
         sendMessage('return_to_menu', {});
     }
 
-    // Build URL to go back to lobby (index.html or root)
-    // Always go to root, don't use getBasePath() as it includes the game.html directory
-    let targetUrl = `${window.location.origin}/`;
+    // Build URL to go back to lobby using the stored entry path
+    const entryPath = getEntryPath();
+    let targetUrl = `${window.location.origin}${entryPath}`;
+
+    // Ensure path ends properly for adding query params
+    if (!targetUrl.includes('.html') && !targetUrl.endsWith('/')) {
+        targetUrl += '/';
+    }
 
     // Only include code if we have a valid one
     if (gameCode) {
-        targetUrl += `?code=${gameCode.toUpperCase()}`;
+        const separator = targetUrl.includes('?') ? '&' : '?';
+        targetUrl += `${separator}code=${gameCode.toUpperCase()}`;
     }
 
     cleanup();
