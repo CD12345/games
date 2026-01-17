@@ -26,6 +26,11 @@ import './games/debug/index.js';
 import './games/liquidwar/index.js';
 import './games/hextd/index.js';
 import './games/historyrpg/index.js';
+import './games/corridorchase/index.js';
+import './games/patternmatch/index.js';
+import './games/claimterritory/index.js';
+import './games/stackrace/index.js';
+import './games/slidepuzzle/index.js';
 
 // DOM Elements
 const screens = {

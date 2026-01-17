@@ -20,7 +20,15 @@ import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
 import './games/hextd/index.js';
+<<<<<<< HEAD
 import './games/historyrpg/index.js';
+=======
+import './games/corridorchase/index.js';
+import './games/patternmatch/index.js';
+import './games/claimterritory/index.js';
+import './games/stackrace/index.js';
+import './games/slidepuzzle/index.js';
+>>>>>>> origin
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -250,16 +258,19 @@ function returnToMenu(notifyPeer = true) {
     if (notifyPeer) {
         sendMessage('return_to_menu', {});
     }
-    const returnCode = gameCode || '';
-    const targetUrl = new URL(window.location.href);
-    // Always redirect to index.html (lobby), not back to game.html
-    targetUrl.pathname = getBasePath() + 'index.html';
-    targetUrl.searchParams.set('code', returnCode.toUpperCase());
-    targetUrl.searchParams.delete('host');
-    targetUrl.searchParams.delete('game');
+
+    // Build URL to go back to lobby (index.html or root)
+    // Always go to root, don't use getBasePath() as it includes the game.html directory
+    let targetUrl = `${window.location.origin}/`;
+
+    // Only include code if we have a valid one
+    if (gameCode) {
+        targetUrl += `?code=${gameCode.toUpperCase()}`;
+    }
+
     cleanup();
     clearStoredSession();
-    window.location.href = targetUrl.toString();
+    window.location.href = targetUrl;
 }
 
 // Initialize
