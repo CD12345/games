@@ -152,7 +152,13 @@ export class LiquidWarGame extends GameEngine {
         } else {
             this.network.onStateUpdate = (state) => {
                 if (state) {
+                    // Preserve guest's own cursor position to prevent jitter
+                    const myCursor = this.state.cursors[this.playerId];
                     this.state = { ...this.state, ...state };
+                    // Restore guest's cursor - don't let host's delayed sync overwrite it
+                    if (myCursor) {
+                        this.state.cursors[this.playerId] = myCursor;
+                    }
                     // Guest receives particle grid data for rendering
                     if (state.particleGridCompressed) {
                         this.decompressParticleGrid(state.particleGridCompressed);
