@@ -17,7 +17,8 @@
       "Bash(timeout /t 2 /nobreak)",
       "Bash(exit 0)",
       "Bash(git -C \"C:\\\\Users\\\\Caleb\\\\source\\\\repos\\\\games\" log --oneline -5)",
-      "Bash(git -C \"C:\\\\Users\\\\Caleb\\\\source\\\\repos\\\\games\" add src/games/historyrpg/core/ScenarioManager.js src/games/historyrpg/core/EventSystem.js src/games/historyrpg/data/ src/games/historyrpg/HistoryRPGGame.js src/games/historyrpg/rendering/IsometricRenderer.js)"
+      "Bash(git -C \"C:\\\\Users\\\\Caleb\\\\source\\\\repos\\\\games\" add src/games/historyrpg/core/ScenarioManager.js src/games/historyrpg/core/EventSystem.js src/games/historyrpg/data/ src/games/historyrpg/HistoryRPGGame.js src/games/historyrpg/rendering/IsometricRenderer.js)",
+      "Bash(git commit:*)"
     ]
   }
 }

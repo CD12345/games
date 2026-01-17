@@ -20,15 +20,12 @@ import './games/pong/index.js';
 import './games/debug/index.js';
 import './games/liquidwar/index.js';
 import './games/hextd/index.js';
-<<<<<<< HEAD
 import './games/historyrpg/index.js';
-=======
 import './games/corridorchase/index.js';
 import './games/patternmatch/index.js';
 import './games/claimterritory/index.js';
 import './games/stackrace/index.js';
 import './games/slidepuzzle/index.js';
->>>>>>> origin
 
 // DOM Elements
 const canvas = document.getElementById('game-canvas');
@@ -140,7 +137,11 @@ async function connectGuestToHost(code) {
 async function connectForGame(code, host, skipWait = false) {
     if (host) {
         await initHostPeer(code);
-        if (!skipWait) {
+        if (skipWait) {
+            // Start listening for connections in background (don't wait)
+            // This ensures the connection handler is set up even when AI fills slots
+            waitForConnection();
+        } else {
             showStatus('Waiting for player to connect...');
             await waitForConnection();
         }
