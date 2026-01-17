@@ -29,7 +29,7 @@ export const LIQUID_WAR_CONFIG = {
 
     // Game settings
     game: {
-        tickRate: 30,            // Logic updates per second
+        tickRate: 60,            // Logic updates per second
         syncRate: 10,            // State syncs per second
         countdownTime: 3000,     // Countdown before game starts (ms)
         maxTime: 180000,         // Max game time (3 minutes)
