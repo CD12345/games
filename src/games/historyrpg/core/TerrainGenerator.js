@@ -57,6 +57,151 @@ export class TerrainGenerator {
 
         // Cached biome map
         this.biomeCache = new Map();
+
+        // Geography data from scenario
+        this.geography = null;
+        this.streetTiles = new Set(); // Cache of tiles that are streets
+        this.waterTiles = new Set();  // Cache of tiles that are water
+        this.streetNames = new Map(); // Map of tile key to street name
+    }
+
+    // Load geography data from scenario
+    loadGeography(geography) {
+        if (!geography) return;
+
+        this.geography = geography;
+        this.streetTiles.clear();
+        this.waterTiles.clear();
+        this.streetNames.clear();
+
+        debugLog(`[TerrainGen] Loading geography: ${geography.streets?.length || 0} streets, ${geography.water?.length || 0} water features`);
+
+        // Pre-compute street tiles
+        if (geography.streets) {
+            for (const street of geography.streets) {
+                this.rasterizeStreet(street);
+            }
+        }
+
+        // Pre-compute water tiles
+        if (geography.water) {
+            for (const water of geography.water) {
+                this.rasterizeWater(water);
+            }
+        }
+
+        debugLog(`[TerrainGen] Rasterized ${this.streetTiles.size} street tiles, ${this.waterTiles.size} water tiles`);
+    }
+
+    // Rasterize a street path to tiles
+    rasterizeStreet(street) {
+        if (!street.path || street.path.length < 2) return;
+
+        const width = street.width || 2;
+
+        for (let i = 0; i < street.path.length - 1; i++) {
+            const p1 = street.path[i];
+            const p2 = street.path[i + 1];
+
+            // Bresenham-style line with width
+            const dx = Math.abs(p2.x - p1.x);
+            const dy = Math.abs(p2.y - p1.y);
+            const sx = p1.x < p2.x ? 1 : -1;
+            const sy = p1.y < p2.y ? 1 : -1;
+            let err = dx - dy;
+
+            let x = Math.floor(p1.x);
+            let y = Math.floor(p1.y);
+            const endX = Math.floor(p2.x);
+            const endY = Math.floor(p2.y);
+
+            while (true) {
+                // Mark tiles within width of this point
+                for (let wx = -Math.floor(width / 2); wx <= Math.floor(width / 2); wx++) {
+                    for (let wy = -Math.floor(width / 2); wy <= Math.floor(width / 2); wy++) {
+                        const key = `${x + wx},${y + wy}`;
+                        this.streetTiles.add(key);
+                        this.streetNames.set(key, street.name);
+                    }
+                }
+
+                if (x === endX && y === endY) break;
+
+                const e2 = 2 * err;
+                if (e2 > -dy) {
+                    err -= dy;
+                    x += sx;
+                }
+                if (e2 < dx) {
+                    err += dx;
+                    y += sy;
+                }
+            }
+        }
+    }
+
+    // Rasterize water features
+    rasterizeWater(water) {
+        if (!water.path || water.path.length < 2) return;
+
+        const width = water.width || 10;
+
+        for (let i = 0; i < water.path.length - 1; i++) {
+            const p1 = water.path[i];
+            const p2 = water.path[i + 1];
+
+            // Line rasterization with width
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const steps = Math.ceil(length);
+
+            for (let s = 0; s <= steps; s++) {
+                const t = s / steps;
+                const cx = Math.floor(p1.x + dx * t);
+                const cy = Math.floor(p1.y + dy * t);
+
+                // Mark tiles within width
+                for (let wx = -Math.floor(width / 2); wx <= Math.floor(width / 2); wx++) {
+                    for (let wy = -Math.floor(width / 2); wy <= Math.floor(width / 2); wy++) {
+                        const dist = Math.sqrt(wx * wx + wy * wy);
+                        if (dist <= width / 2) {
+                            this.waterTiles.add(`${cx + wx},${cy + wy}`);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if a tile is a street from geography data
+    isGeographyStreet(x, y) {
+        return this.streetTiles.has(`${x},${y}`);
+    }
+
+    // Check if a tile is water from geography data
+    isGeographyWater(x, y) {
+        return this.waterTiles.has(`${x},${y}`);
+    }
+
+    // Get street name at a tile
+    getStreetName(x, y) {
+        return this.streetNames.get(`${x},${y}`) || null;
+    }
+
+    // Get district at position
+    getDistrict(x, y) {
+        if (!this.geography?.districts) return null;
+
+        for (const district of this.geography.districts) {
+            const dx = x - district.centerX;
+            const dy = y - district.centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= district.radius) {
+                return district;
+            }
+        }
+        return null;
     }
 
     // Generate terrain for a chunk
@@ -87,15 +232,36 @@ export class TerrainGenerator {
 
     // Generate a single tile
     generateTile(x, y, context = {}) {
-        // Get biome at this location
-        const biome = this.getBiome(x, y, context);
-
         // Get base noise values
         const baseNoise = this.fractalNoise(x, y, this.baseScale, 3);
         const detailNoise = this.fractalNoise(x, y, this.detailScale, 2);
         const destructionNoise = this.fractalNoise(x, y, this.destructionScale, 2);
 
-        // Check if this is a street
+        // Check geography data first (takes priority)
+        if (this.geography) {
+            // Check if water
+            if (this.isGeographyWater(x, y)) {
+                return { type: TILE_TYPES.WATER, height: 0 };
+            }
+
+            // Check if street
+            if (this.isGeographyStreet(x, y)) {
+                // Some streets may be damaged
+                if (destructionNoise > 0.7) {
+                    return { type: TILE_TYPES.RUBBLE, height: 1 };
+                }
+                return { type: TILE_TYPES.ROAD, height: 0 };
+            }
+
+            // Get district for biome info
+            const district = this.getDistrict(x, y);
+            if (district) {
+                return this.generateDistrictTile(x, y, district, detailNoise, destructionNoise);
+            }
+        }
+
+        // Fall back to procedural generation
+        const biome = this.getBiome(x, y, context);
         const isStreet = this.isStreet(x, y);
 
         // Generate based on biome
@@ -112,7 +278,6 @@ export class TerrainGenerator {
                 if (isStreet) {
                     type = TILE_TYPES.ROAD;
                 } else if (this.isBuilding(x, y, 0.6)) {
-                    // Industrial buildings are larger
                     type = destructionNoise > 0.4 ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
                     height = destructionNoise > 0.4 ? 1 : Math.floor(detailNoise * 3) + 1;
                 } else {
@@ -127,7 +292,6 @@ export class TerrainGenerator {
                     type = destructionNoise > 0.5 ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
                     height = destructionNoise > 0.5 ? 1 : Math.floor(detailNoise * 2) + 1;
                 } else {
-                    // Courtyards and gardens
                     type = detailNoise > 0.7 ? TILE_TYPES.SNOW : TILE_TYPES.GROUND;
                 }
                 break;
@@ -136,7 +300,6 @@ export class TerrainGenerator {
                 if (isStreet) {
                     type = TILE_TYPES.ROAD;
                 } else if (this.isBuilding(x, y, 0.7)) {
-                    // More destruction in city center (heavy fighting)
                     type = destructionNoise > 0.35 ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
                     height = destructionNoise > 0.35 ? 2 : Math.floor(detailNoise * 4) + 1;
                 } else {
@@ -145,7 +308,6 @@ export class TerrainGenerator {
                 break;
 
             case BIOMES.RUINS:
-                // Almost everything is destroyed
                 if (isStreet) {
                     type = destructionNoise > 0.6 ? TILE_TYPES.RUBBLE : TILE_TYPES.ROAD;
                 } else {
@@ -155,12 +317,79 @@ export class TerrainGenerator {
                 break;
 
             case BIOMES.OPEN:
-                // Parks, squares - some snow
                 type = baseNoise > 0.6 ? TILE_TYPES.SNOW : TILE_TYPES.GROUND;
                 if (destructionNoise > 0.7) {
                     type = TILE_TYPES.RUBBLE;
                     height = 1;
                 }
+                break;
+
+            default:
+                type = TILE_TYPES.GROUND;
+        }
+
+        return { type, height };
+    }
+
+    // Generate tile based on district type
+    generateDistrictTile(x, y, district, detailNoise, destructionNoise) {
+        let type = TILE_TYPES.GROUND;
+        let height = 0;
+
+        // Destruction level based on district type
+        const destructionThreshold = district.type === 'ruins' ? 0.2 :
+                                     district.type === 'military' ? 0.4 :
+                                     district.type === 'industrial' ? 0.5 : 0.6;
+
+        const isDestroyed = destructionNoise > destructionThreshold;
+
+        // Check if this should be a building (not on streets)
+        const isBuilding = this.isBuilding(x, y,
+            district.type === 'commercial' ? 0.7 :
+            district.type === 'industrial' ? 0.6 :
+            district.type === 'residential' ? 0.5 : 0.4
+        );
+
+        switch (district.type) {
+            case 'industrial':
+                if (isBuilding) {
+                    type = isDestroyed ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
+                    height = isDestroyed ? 1 : Math.floor(detailNoise * 3) + 2;
+                } else {
+                    type = TILE_TYPES.FLOOR;
+                }
+                break;
+
+            case 'residential':
+                if (isBuilding) {
+                    type = isDestroyed ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
+                    height = isDestroyed ? 1 : Math.floor(detailNoise * 2) + 1;
+                } else {
+                    type = detailNoise > 0.7 ? TILE_TYPES.SNOW : TILE_TYPES.GROUND;
+                }
+                break;
+
+            case 'commercial':
+                if (isBuilding) {
+                    type = isDestroyed ? TILE_TYPES.RUBBLE : TILE_TYPES.BUILDING;
+                    height = isDestroyed ? 2 : Math.floor(detailNoise * 4) + 1;
+                } else {
+                    type = TILE_TYPES.FLOOR;
+                }
+                break;
+
+            case 'military':
+                if (isBuilding) {
+                    type = isDestroyed ? TILE_TYPES.RUBBLE : TILE_TYPES.WALL;
+                    height = isDestroyed ? 1 : 2;
+                } else {
+                    type = TILE_TYPES.FLOOR;
+                }
+                break;
+
+            case 'ruins':
+                type = TILE_TYPES.RUBBLE;
+                height = Math.floor(destructionNoise * 3);
                 break;
 
             default:

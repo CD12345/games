@@ -84,19 +84,6 @@ export const TIME = {
     DUSK: 18
 };
 
-// Available scenarios (for MVP)
-export const SCENARIOS = {
-    STALINGRAD: {
-        id: 'stalingrad_nov42',
-        name: 'Battle of Stalingrad',
-        timePeriod: 'World War 2',
-        date: 'November 1942',
-        location: 'Stalingrad, Soviet Union',
-        lat: 48.708,
-        lon: 44.513
-    }
-};
-
 // Get initial game state
 export function getInitialState(settings = {}) {
     return {
@@ -105,9 +92,14 @@ export function getInitialState(settings = {}) {
         startTime: Date.now(),
         elapsed: 0,
 
-        // Scenario
+        // Scenario settings (from user input)
+        scenarioSettings: {
+            location: settings.location || 'Stalingrad, Soviet Union',
+            date: settings.date || 'January 1, 1943'
+        },
+
+        // Generated scenario (populated after AI generation)
         scenario: null,
-        scenarioId: settings.scenarioId || 'stalingrad_nov42',
 
         // Player
         player: {
@@ -135,6 +127,9 @@ export function getInitialState(settings = {}) {
         // NPCs (sparse - only nearby NPCs fully loaded)
         npcs: {},
         npcPositions: {},
+
+        // Pre-generated conversation trees (populated by AI)
+        conversationTrees: {},
 
         // Current interaction
         currentDialogue: null,

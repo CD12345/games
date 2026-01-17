@@ -341,7 +341,20 @@ export class AIGateway {
 
     // Cache helpers
     getCacheKey(prompt, options) {
-        return `${this.provider}:${JSON.stringify(options)}:${prompt.substring(0, 100)}`;
+        // Use a hash of the full prompt to avoid cache collisions
+        const promptHash = this.hashString(prompt);
+        return `${this.provider}:${JSON.stringify(options)}:${promptHash}`;
+    }
+
+    // Simple hash function for cache keys
+    hashString(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return hash.toString(36);
     }
 
     getFromCache(key) {

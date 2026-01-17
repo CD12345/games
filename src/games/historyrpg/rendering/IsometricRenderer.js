@@ -352,4 +352,123 @@ export class IsometricRenderer {
         ctx.textAlign = 'center';
         ctx.fillText('N', mapX + size / 2, mapY - 5);
     }
+
+    // Render street names on the map
+    renderStreetNames(terrainGenerator, playerPos) {
+        if (!terrainGenerator?.geography?.streets) return;
+
+        const ctx = this.ctx;
+        const range = this.getVisibleRange();
+
+        // Track which streets we've already labeled to avoid duplicates
+        const labeledStreets = new Set();
+
+        // Find street label positions
+        const streetLabels = [];
+
+        for (const street of terrainGenerator.geography.streets) {
+            if (labeledStreets.has(street.name)) continue;
+            if (!street.path || street.path.length < 2) continue;
+
+            // Find a point on the street that's visible
+            for (let i = 0; i < street.path.length - 1; i++) {
+                const p1 = street.path[i];
+                const p2 = street.path[i + 1];
+
+                // Get midpoint of this segment
+                const midX = (p1.x + p2.x) / 2;
+                const midY = (p1.y + p2.y) / 2;
+
+                // Check if visible
+                if (midX >= range.minX && midX <= range.maxX &&
+                    midY >= range.minY && midY <= range.maxY) {
+
+                    // Calculate angle for text rotation
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const angle = Math.atan2(dy - dx, dx + dy); // Adjust for isometric
+
+                    streetLabels.push({
+                        name: street.name,
+                        x: midX,
+                        y: midY,
+                        angle: angle,
+                        type: street.type
+                    });
+
+                    labeledStreets.add(street.name);
+                    break;
+                }
+            }
+        }
+
+        // Render the labels
+        ctx.save();
+        for (const label of streetLabels) {
+            const screen = this.worldToScreen(label.x, label.y, 0);
+
+            ctx.save();
+            ctx.translate(screen.x, screen.y);
+
+            // Draw background
+            const fontSize = label.type === 'main' ? 12 : 10;
+            ctx.font = `${fontSize}px monospace`;
+            const textWidth = ctx.measureText(label.name).width;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(-textWidth / 2 - 4, -fontSize / 2 - 2, textWidth + 8, fontSize + 4);
+
+            // Draw text
+            ctx.fillStyle = label.type === 'main' ? '#c9a227' : '#aaa';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label.name, 0, 0);
+
+            ctx.restore();
+        }
+        ctx.restore();
+    }
+
+    // Render location markers for key locations
+    renderLocationMarkers(scenario, playerPos) {
+        if (!scenario?.locations) return;
+
+        const ctx = this.ctx;
+        const range = this.getVisibleRange();
+
+        for (const [locId, location] of Object.entries(scenario.locations)) {
+            const x = location.gridX;
+            const y = location.gridY;
+
+            // Check if visible
+            if (x < range.minX || x > range.maxX || y < range.minY || y > range.maxY) continue;
+
+            const screen = this.worldToScreen(x, y, 0);
+
+            // Draw marker
+            ctx.save();
+
+            // Location icon (small diamond)
+            ctx.fillStyle = location.isStartLocation ? '#3498db' : '#c9a227';
+            ctx.beginPath();
+            ctx.moveTo(screen.x, screen.y - 15);
+            ctx.lineTo(screen.x + 8, screen.y - 7);
+            ctx.lineTo(screen.x, screen.y);
+            ctx.lineTo(screen.x - 8, screen.y - 7);
+            ctx.closePath();
+            ctx.fill();
+
+            // Location name
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.font = '11px monospace';
+            const textWidth = ctx.measureText(location.name).width;
+            ctx.fillRect(screen.x - textWidth / 2 - 4, screen.y - 32, textWidth + 8, 14);
+
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            ctx.fillText(location.name, screen.x, screen.y - 22);
+
+            ctx.restore();
+        }
+    }
 }

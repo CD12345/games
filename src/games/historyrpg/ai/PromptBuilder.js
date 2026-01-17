@@ -110,14 +110,15 @@ Your current mood: {{mood}}
 Your disposition toward the player: {{disposition}}/100 (0=hostile, 50=neutral, 100=friendly)
 
 Current situation: {{context}}
-
-The player (a {{playerRole}}) says: "{{playerInput}}"
+{{conversationHistory}}
+The player (a {{playerRole}}) now says: "{{playerInput}}"
 
 Respond in character. Consider:
 - Your knowledge and what you might reveal
 - Your disposition - are you helpful or guarded?
 - Historical accuracy for the time period
 - What you might want from the player
+- The conversation history above - continue the discussion naturally
 
 Return ONLY valid JSON:
 {
@@ -301,6 +302,16 @@ export class PromptBuilder {
 
     // Build NPC dialogue prompt
     buildDialoguePrompt(npc, playerInput, context) {
+        // Format conversation history if provided
+        let conversationHistory = '';
+        if (context.history && context.history.length > 0) {
+            conversationHistory = '\nConversation so far:\n';
+            for (const entry of context.history) {
+                const speaker = entry.isPlayer ? 'Player' : npc.name;
+                conversationHistory += `${speaker}: "${entry.text}"\n`;
+            }
+        }
+
         return this.build('NPC_DIALOGUE', {
             npcName: npc.name,
             npcRole: npc.role,
@@ -312,7 +323,8 @@ export class PromptBuilder {
             disposition: npc.disposition || 50,
             context: context.situation || 'The city is under siege.',
             playerRole: context.playerRole || 'civilian',
-            playerInput: playerInput
+            playerInput: playerInput,
+            conversationHistory: conversationHistory
         });
     }
 

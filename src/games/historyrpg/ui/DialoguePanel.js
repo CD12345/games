@@ -118,6 +118,8 @@ export class DialoguePanel {
 
     // Update dialogue with new response
     updateDialogue(response) {
+        debugLog(`[DialoguePanel] Updating dialogue, new speech: "${response.speech?.substring(0, 40)}..."`);
+
         // Add previous exchange to history
         if (this.dialogue) {
             this.history.push({
@@ -133,6 +135,8 @@ export class DialoguePanel {
             { text: "Goodbye.", type: "leave" }
         ];
         this.selectedChoice = 0;
+
+        debugLog(`[DialoguePanel] New choices: ${this.choices.map(c => c.text).join(', ')}`);
 
         // Restart text reveal
         this.textRevealIndex = 0;
@@ -156,31 +160,58 @@ export class DialoguePanel {
 
     // Attach input handlers
     attachInputHandlers() {
+        // Prevent duplicate attachment
+        if (this._handlersAttached) {
+            debugLog(`[DialoguePanel] Handlers already attached, skipping`);
+            return;
+        }
+        this._handlersAttached = true;
         this.canvas.addEventListener('click', this.handleClick);
+        this.canvas.addEventListener('touchend', this.handleClick); // Mobile support
         this.canvas.addEventListener('mousemove', this.handleMouseMove);
         document.addEventListener('keydown', this.handleKeyDown);
+        debugLog(`[DialoguePanel] Input handlers attached`);
     }
 
     // Remove input handlers
     removeInputHandlers() {
+        this._handlersAttached = false;
         this.canvas.removeEventListener('click', this.handleClick);
+        this.canvas.removeEventListener('touchend', this.handleClick);
         this.canvas.removeEventListener('mousemove', this.handleMouseMove);
         document.removeEventListener('keydown', this.handleKeyDown);
+        debugLog(`[DialoguePanel] Input handlers removed`);
     }
 
-    // Handle mouse click
+    // Handle mouse click or touch
     handleClick(e) {
         const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        let x, y;
+
+        // Handle both mouse and touch events
+        if (e.type === 'touchend' && e.changedTouches) {
+            x = e.changedTouches[0].clientX - rect.left;
+            y = e.changedTouches[0].clientY - rect.top;
+            // For touch, we need to calculate which choice was tapped
+            this.hoveredChoice = this.getChoiceAtPosition(x, y);
+        } else {
+            x = e.clientX - rect.left;
+            y = e.clientY - rect.top;
+        }
+
+        debugLog(`[DialoguePanel] handleClick (${e.type}) - pos: (${Math.round(x)}, ${Math.round(y)}), hoveredChoice: ${this.hoveredChoice}, isRevealing: ${this.isRevealing}`);
 
         // Check if clicking on a choice
         if (this.hoveredChoice >= 0 && !this.isRevealing) {
+            debugLog(`[DialoguePanel] Clicking on choice ${this.hoveredChoice}`);
             this.selectChoice(this.hoveredChoice);
         } else if (this.isRevealing) {
             // Skip text reveal
+            debugLog(`[DialoguePanel] Skipping text reveal`);
             this.textRevealIndex = this.dialogue?.speech?.length || 0;
             this.isRevealing = false;
+        } else {
+            debugLog(`[DialoguePanel] Click ignored - no hovered choice`);
         }
     }
 
@@ -242,10 +273,15 @@ export class DialoguePanel {
 
     // Select a choice
     selectChoice(index) {
-        if (index < 0 || index >= this.choices.length) return;
+        debugLog(`[DialoguePanel] selectChoice called with index: ${index}, choices length: ${this.choices.length}`);
+
+        if (index < 0 || index >= this.choices.length) {
+            debugLog(`[DialoguePanel] Invalid index, returning`);
+            return;
+        }
 
         const choice = this.choices[index];
-        debugLog(`[DialoguePanel] Selected choice: ${choice.text}`);
+        debugLog(`[DialoguePanel] Selected choice: "${choice.text}" (type: ${choice.type})`);
 
         // Add player response to history
         this.history.push({
@@ -255,9 +291,13 @@ export class DialoguePanel {
         });
 
         if (choice.type === 'leave' || choice.type === 'leaving') {
+            debugLog(`[DialoguePanel] Choice is leave/leaving, ending dialogue`);
             this.endDialogue();
         } else if (this.onChoiceSelected) {
-            this.onChoiceSelected(choice);
+            debugLog(`[DialoguePanel] Calling onChoiceSelected callback`);
+            this.onChoiceSelected(choice, index); // Pass index for tree navigation
+        } else {
+            debugLog(`[DialoguePanel] WARNING: No onChoiceSelected callback set!`);
         }
     }
 

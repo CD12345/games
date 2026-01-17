@@ -6,18 +6,21 @@ import { ScenarioManager } from './core/ScenarioManager.js';
 import { EventSystem } from './core/EventSystem.js';
 import { TerrainGenerator } from './core/TerrainGenerator.js';
 import { EntityManager, ENTITY_TYPES } from './core/EntityManager.js';
-import { QuestManager } from './core/QuestManager.js';
+import { QuestManager, Quest, QUEST_STATES } from './core/QuestManager.js';
 import { CutsceneManager, CUTSCENE_TRIGGERS } from './core/CutsceneManager.js';
+import { ConversationTreeManager } from './core/ConversationTreeManager.js';
 import { IsometricRenderer } from './rendering/IsometricRenderer.js';
 import { CutsceneRenderer } from './rendering/CutsceneRenderer.js';
 import { DialoguePanel } from './ui/DialoguePanel.js';
 import { JournalPanel } from './ui/JournalPanel.js';
 import { InventoryPanel } from './ui/InventoryPanel.js';
+import { LoadingScreen } from './ui/LoadingScreen.js';
 import { AIGateway } from './ai/AIGateway.js';
 import { PromptBuilder } from './ai/PromptBuilder.js';
 import { ResponseParser } from './ai/ResponseParser.js';
 import { GenerationQueue } from './ai/GenerationQueue.js';
-import { PHASES, MOVEMENT, TIME, SCENARIOS, getInitialState } from './config.js';
+import { ScenarioGenerator } from './ai/ScenarioGenerator.js';
+import { PHASES, MOVEMENT, TIME, getInitialState } from './config.js';
 import { debugLog } from '../../ui/DebugOverlay.js';
 
 export class HistoryRPGGame extends GameEngine {
@@ -44,6 +47,7 @@ export class HistoryRPGGame extends GameEngine {
         this.entityManager = null;
         this.questManager = null;
         this.cutsceneManager = null;
+        this.conversationManager = null;
 
         // Renderers
         this.cutsceneRenderer = null;
@@ -52,12 +56,14 @@ export class HistoryRPGGame extends GameEngine {
         this.dialoguePanel = null;
         this.journalPanel = null;
         this.inventoryPanel = null;
+        this.loadingScreen = null;
 
         // AI systems
         this.aiGateway = null;
         this.promptBuilder = null;
         this.responseParser = null;
         this.generationQueue = null;
+        this.scenarioGenerator = null;
 
         // Input state
         this.keys = {};
@@ -88,6 +94,9 @@ export class HistoryRPGGame extends GameEngine {
         // Create renderer
         this.renderer = new IsometricRenderer(this.canvas);
 
+        // Create loading screen
+        this.loadingScreen = new LoadingScreen(this.canvas);
+
         // Create UI panels
         this.dialoguePanel = new DialoguePanel(this.canvas);
         this.journalPanel = new JournalPanel(this.canvas);
@@ -97,6 +106,16 @@ export class HistoryRPGGame extends GameEngine {
 
         // Initialize AI systems
         this.initializeAI();
+
+        // Create scenario generator
+        this.scenarioGenerator = new ScenarioGenerator(this.aiGateway);
+        this.scenarioGenerator.onProgressUpdate = (progress, status) => {
+            this.loadingScreen.setProgress(progress, status);
+        };
+
+        // Create conversation tree manager
+        this.conversationManager = new ConversationTreeManager();
+        this.setupConversationCallbacks();
 
         // Create scenario manager (pass generation queue for AI generation)
         this.scenarioManager = new ScenarioManager(this.generationQueue);
@@ -120,31 +139,322 @@ export class HistoryRPGGame extends GameEngine {
         // Set up input handlers
         this.setupInputHandlers();
 
-        // Start in loading phase
-        this.state.phase = PHASES.LOADING;
-        this.renderLoadingScreen('Initializing...');
+        // Start in generating phase with loading screen
+        this.state.phase = PHASES.GENERATING;
+        this.loadingScreen.show();
 
-        // Try to generate or load scenario
-        await this.initializeScenario();
+        // Start a temporary render loop for the loading screen
+        // (main game loop doesn't start until start() is called after initialize)
+        let loadingAnimationId = null;
+        let lastTime = performance.now();
+        let firstFrame = true;
+        const renderLoadingScreen = (time) => {
+            if (this.state.phase !== PHASES.GENERATING && this.state.phase !== PHASES.LOADING) {
+                debugLog('[HistoryRPG] Loading render loop stopped - phase changed');
+                return; // Stop when generation is complete
+            }
+            if (firstFrame) {
+                debugLog(`[HistoryRPG] Loading render loop started - canvas: ${this.canvas.width}x${this.canvas.height}`);
+                firstFrame = false;
+            }
+            const deltaTime = (time - lastTime) / 1000;
+            lastTime = time;
+            this.loadingScreen.update(deltaTime);
+            this.loadingScreen.render();
+            loadingAnimationId = requestAnimationFrame(renderLoadingScreen);
+        };
+        loadingAnimationId = requestAnimationFrame(renderLoadingScreen);
 
-        // Generate initial terrain around start position
-        this.generateInitialWorld();
-
-        // Center camera on player
-        this.renderer.setCamera(
-            this.state.player.position.x,
-            this.state.player.position.y
-        );
-
-        // Transition to playing state
-        this.state.phase = PHASES.PLAYING;
-
-        // Trigger intro cutscene
-        if (this.cutsceneManager) {
-            this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.GAME_START);
+        // Generate the complete scenario
+        try {
+            await this.generateCompleteScenario();
+            debugLog('[HistoryRPG] Scenario generation complete, building world...');
+        } catch (error) {
+            console.error('[HistoryRPG] Scenario generation failed:', error);
+            this.loadingScreen.renderError(error.message);
+            return;
         }
 
-        console.log('[HistoryRPG] Initialized');
+        try {
+            // Generate initial terrain around start position
+            debugLog('[HistoryRPG] Generating initial world terrain...');
+            this.generateInitialWorld();
+
+            // Center camera on player
+            debugLog(`[HistoryRPG] Centering camera on player at (${this.state.player.position.x}, ${this.state.player.position.y})`);
+            this.renderer.setCamera(
+                this.state.player.position.x,
+                this.state.player.position.y
+            );
+
+            // Stop loading animation and hide loading screen
+            debugLog('[HistoryRPG] Hiding loading screen...');
+            if (loadingAnimationId) {
+                cancelAnimationFrame(loadingAnimationId);
+            }
+            this.loadingScreen.hide();
+
+            // Transition to playing state
+            this.state.phase = PHASES.PLAYING;
+            debugLog('[HistoryRPG] Phase set to PLAYING');
+
+            // Create and trigger intro cutscene based on generated scenario
+            if (this.cutsceneManager && this.state.scenario) {
+                debugLog('[HistoryRPG] Creating intro cutscene...');
+                this.createIntroCutscene();
+                this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.GAME_START);
+            }
+
+            console.log('[HistoryRPG] Initialized with scenario:', this.state.scenario?.title);
+        } catch (error) {
+            console.error('[HistoryRPG] World initialization failed:', error);
+            debugLog(`[HistoryRPG] ERROR: ${error.message}`);
+            debugLog(`[HistoryRPG] Stack: ${error.stack}`);
+            this.loadingScreen.renderError(`World setup failed: ${error.message}`);
+        }
+    }
+
+    // Set up conversation tree callbacks
+    setupConversationCallbacks() {
+        this.conversationManager.onObjectiveComplete = (objectiveId) => {
+            debugLog(`[HistoryRPG] Objective completed via conversation: ${objectiveId}`);
+            this.completeObjective(objectiveId);
+        };
+
+        this.conversationManager.onItemReceived = (itemId) => {
+            debugLog(`[HistoryRPG] Item received via conversation: ${itemId}`);
+            this.addItemToInventory(itemId);
+        };
+
+        this.conversationManager.onConversationEnd = (npcId) => {
+            debugLog(`[HistoryRPG] Conversation ended with: ${npcId}`);
+            this.endDialogue();
+        };
+    }
+
+    // Generate the complete scenario using AI
+    async generateCompleteScenario() {
+        const { location, date } = this.state.scenarioSettings;
+
+        debugLog(`[HistoryRPG] Generating scenario for ${location} on ${date}`);
+
+        // Generate complete scenario with conversation trees
+        const scenario = await this.scenarioGenerator.generateScenario({
+            location,
+            date,
+            characterType: this.state.player.characterType
+        });
+
+        // Store the scenario
+        this.state.scenario = scenario;
+
+        // Load geography data into terrain generator
+        if (scenario.geography && this.terrainGenerator) {
+            debugLog(`[HistoryRPG] Loading geography: ${scenario.geography.streets?.length || 0} streets`);
+            this.terrainGenerator.loadGeography(scenario.geography);
+        }
+
+        // Load conversation trees
+        this.conversationManager.loadTrees(scenario.conversationTrees);
+
+        // Set player start position
+        this.state.player.position = {
+            x: scenario.playerStart.x,
+            y: scenario.playerStart.y
+        };
+
+        // Spawn main NPCs
+        this.spawnScenarioNPCs(scenario);
+
+        // Register quests from objectives
+        this.registerScenarioQuests(scenario);
+
+        debugLog(`[HistoryRPG] Scenario loaded: ${scenario.title}`);
+        debugLog(`[HistoryRPG] Main goal: ${scenario.mainGoal.title}`);
+        debugLog(`[HistoryRPG] ${Object.keys(scenario.mainNPCs).length} NPCs, ${scenario.objectives.length} objectives`);
+    }
+
+    // Spawn NPCs from the generated scenario
+    spawnScenarioNPCs(scenario) {
+        for (const [npcId, npc] of Object.entries(scenario.mainNPCs)) {
+            // Get location for this NPC
+            const location = scenario.locations[npc.locationId];
+            const x = location?.gridX || scenario.playerStart.x + Math.floor(Math.random() * 20) - 10;
+            const y = location?.gridY || scenario.playerStart.y + Math.floor(Math.random() * 20) - 10;
+
+            // Add to entity manager
+            if (this.entityManager) {
+                this.entityManager.createNPC({
+                    id: npcId,
+                    name: npc.name,
+                    role: npc.role,
+                    faction: npc.faction,
+                    personality: npc.description,
+                    disposition: 50
+                }, x, y);
+            }
+
+            // Also add to state for quick lookup
+            this.state.npcs[npcId] = {
+                id: npcId,
+                name: npc.name,
+                role: npc.role,
+                faction: npc.faction,
+                description: npc.description,
+                locationId: npc.locationId,
+                hasItem: npc.hasItem,
+                wantsItem: npc.wantsItem,
+                isEssential: npc.isEssential,
+                disposition: 50,
+                met: false,
+                position: { x, y }
+            };
+
+            // Note: EntityManager.createNPC already registers with worldGrid
+
+            debugLog(`[HistoryRPG] Spawned NPC: ${npc.name} at (${x}, ${y})`);
+        }
+    }
+
+    // Register quests from scenario objectives
+    registerScenarioQuests(scenario) {
+        // Create main quest using Quest class
+        const mainQuest = new Quest({
+            id: scenario.mainGoal.id,
+            title: scenario.mainGoal.title,
+            description: scenario.mainGoal.description,
+            type: 'main',
+            objectives: scenario.objectives.map(obj => ({
+                id: obj.id,
+                description: obj.title,
+                type: obj.type,
+                target: obj.target
+            }))
+        });
+
+        // Set quest as available so startQuest will work
+        mainQuest.state = QUEST_STATES.AVAILABLE;
+
+        if (this.questManager) {
+            this.questManager.addQuest(mainQuest);
+            this.questManager.startQuest(mainQuest.id);
+        }
+
+        debugLog(`[HistoryRPG] Registered main quest: ${mainQuest.title}`);
+    }
+
+    // Complete an objective
+    completeObjective(objectiveId) {
+        if (!this.state.scenario) return;
+
+        const objective = this.state.scenario.objectives.find(o => o.id === objectiveId);
+        if (objective && !this.state.scenario.completedObjectives.includes(objectiveId)) {
+            this.state.scenario.completedObjectives.push(objectiveId);
+            debugLog(`[HistoryRPG] Completed objective: ${objective.title}`);
+
+            // Update quest manager - get the quest and complete the objective
+            if (this.questManager) {
+                const mainQuestId = this.state.scenario.mainGoal.id;
+                const quest = this.questManager.quests.get(mainQuestId);
+                if (quest) {
+                    quest.completeObjective(objectiveId);
+
+                    // Trigger callback if all quest objectives are done
+                    if (this.questManager.onObjectiveComplete) {
+                        this.questManager.onObjectiveComplete(quest, objective);
+                    }
+                }
+            }
+
+            // Check if all objectives complete
+            if (this.state.scenario.completedObjectives.length === this.state.scenario.objectives.length) {
+                this.handleScenarioComplete();
+            }
+        }
+    }
+
+    // Handle scenario completion
+    handleScenarioComplete() {
+        debugLog(`[HistoryRPG] SCENARIO COMPLETE!`);
+
+        // Create ending cutscene
+        if (this.cutsceneManager && this.state.scenario.mainGoal.successEnding) {
+            const endingCutscene = {
+                id: 'ending',
+                title: 'Victory',
+                autoAdvance: false,
+                frames: [
+                    {
+                        environment: 'exterior_day',
+                        title: this.state.scenario.mainGoal.title,
+                        text: this.state.scenario.mainGoal.successEnding
+                    },
+                    {
+                        environment: 'exterior_day',
+                        title: 'THE END',
+                        text: 'Your choices shaped history. Well done!'
+                    }
+                ],
+                trigger: CUTSCENE_TRIGGERS.CUSTOM
+            };
+
+            this.cutsceneManager.addCutscene(endingCutscene);
+            this.cutsceneManager.queueCutscene('ending');
+        }
+    }
+
+    // Create intro cutscene from generated scenario
+    createIntroCutscene() {
+        if (!this.state.scenario) return;
+
+        const scenario = this.state.scenario;
+        const introCutscene = {
+            id: 'intro',
+            title: scenario.title,
+            autoAdvance: false,
+            frames: [
+                {
+                    environment: 'exterior_day',
+                    title: scenario.inputSettings.location,
+                    subtitle: scenario.inputSettings.date,
+                    text: scenario.setting
+                },
+                {
+                    environment: 'interior_ruined',
+                    text: scenario.historicalContext || 'You find yourself caught in the currents of history.'
+                },
+                {
+                    environment: 'interior_ruined',
+                    title: 'Your Goal',
+                    text: scenario.mainGoal.description
+                }
+            ],
+            trigger: CUTSCENE_TRIGGERS.GAME_START
+        };
+
+        this.cutsceneManager.addCutscene(introCutscene);
+    }
+
+    // Add item to player inventory
+    addItemToInventory(itemId) {
+        if (!this.state.scenario?.items) return;
+
+        const item = this.state.scenario.items[itemId];
+        if (item && !this.state.player.inventory.includes(itemId)) {
+            this.state.player.inventory.push(itemId);
+            this.state.scenario.collectedItems.push(itemId);
+
+            debugLog(`[HistoryRPG] Added to inventory: ${item.name}`);
+
+            // Update inventory panel
+            if (this.inventoryPanel) {
+                this.inventoryPanel.addItem({
+                    id: itemId,
+                    name: item.name,
+                    description: item.description
+                });
+            }
+        }
     }
 
     // Set up event system callbacks
@@ -190,15 +500,86 @@ export class HistoryRPGGame extends GameEngine {
 
     // Set up dialogue panel callbacks
     setupDialogueCallbacks() {
-        this.dialoguePanel.onChoiceSelected = async (choice) => {
+        this.dialoguePanel.onChoiceSelected = async (choice, choiceIndex) => {
             debugLog(`[HistoryRPG] Player chose: ${choice.text}`);
-            await this.continueDialogue(choice.text);
+
+            // Check if using conversation tree
+            if (this.state.currentDialogue?.usingTree) {
+                this.processTreeChoice(choiceIndex);
+            } else {
+                await this.continueDialogue(choice.text);
+            }
         };
 
         this.dialoguePanel.onDialogueEnd = () => {
             debugLog(`[HistoryRPG] Dialogue ended`);
             this.endDialogue();
         };
+    }
+
+    // Process a choice in tree-based dialogue
+    processTreeChoice(choiceIndex) {
+        if (!this.state.currentDialogue?.usingTree) return;
+
+        const result = this.conversationManager.processChoice(
+            choiceIndex,
+            this.state.player.inventory
+        );
+
+        if (!result) {
+            debugLog(`[HistoryRPG] Failed to process tree choice`);
+            this.endDialogue();
+            return;
+        }
+
+        // Add player choice to history
+        this.state.currentDialogue.history.push({
+            speaker: 'player',
+            text: result.choiceText,
+            isPlayer: true
+        });
+
+        // Handle item received
+        if (result.itemReceived) {
+            this.addItemToInventory(result.itemReceived);
+        }
+
+        // Handle objective completed
+        if (result.objectiveCompleted) {
+            this.completeObjective(result.objectiveCompleted);
+        }
+
+        // Check if conversation ended
+        if (result.ended) {
+            debugLog(`[HistoryRPG] Tree conversation ended`);
+            this.endDialogue();
+            return;
+        }
+
+        // Add NPC response to history
+        this.state.currentDialogue.history.push({
+            speaker: this.state.currentDialogue.npc.name,
+            text: result.speech,
+            isPlayer: false
+        });
+
+        // Format response for dialogue panel
+        const response = {
+            speech: result.speech,
+            emotion: 'neutral',
+            suggestedChoices: result.choices.map(c => ({
+                text: c.text,
+                type: c.type || 'neutral',
+                nodeId: c.nextNode,
+                requiresItem: c.requiresItem,
+                givesItem: c.givesItem,
+                completesObjective: c.completesObjective
+            }))
+        };
+
+        // Update dialogue state and panel
+        this.state.currentDialogue.response = response;
+        this.dialoguePanel.updateDialogue(response);
     }
 
     // Set up quest manager callbacks
@@ -698,6 +1079,14 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     handleClick(e) {
+        // Don't process world clicks during dialogue, cutscene, or when UI panels are open
+        if (this.state.phase === PHASES.DIALOGUE ||
+            this.state.phase === PHASES.CUTSCENE ||
+            this.journalPanel?.isOpen ||
+            this.inventoryPanel?.isOpen) {
+            return;
+        }
+
         // Convert screen position to world position
         let screenX, screenY;
 
@@ -728,6 +1117,14 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     update(deltaTime) {
+        // Handle loading/generating phase
+        if (this.state.phase === PHASES.LOADING || this.state.phase === PHASES.GENERATING) {
+            if (this.loadingScreen) {
+                this.loadingScreen.update(deltaTime);
+            }
+            return;
+        }
+
         // Handle cutscene phase
         if (this.state.phase === PHASES.CUTSCENE) {
             if (this.cutsceneManager) {
@@ -944,6 +1341,14 @@ export class HistoryRPGGame extends GameEngine {
     }
 
     render() {
+        // Render loading screen during scenario generation
+        if (this.state.phase === PHASES.GENERATING || this.state.phase === PHASES.LOADING) {
+            if (this.loadingScreen?.isVisible) {
+                this.loadingScreen.render();
+            }
+            return;
+        }
+
         // Render cutscene if in cutscene phase
         if (this.state.phase === PHASES.CUTSCENE && this.cutsceneManager?.isPlaying()) {
             this.cutsceneManager.render();
@@ -978,6 +1383,16 @@ export class HistoryRPGGame extends GameEngine {
                     this.renderer.renderNPC(pos.x, pos.y, npc);
                 }
             }
+        }
+
+        // Render street names (from AI-generated geography)
+        if (this.terrainGenerator) {
+            this.renderer.renderStreetNames(this.terrainGenerator, this.state.player.position);
+        }
+
+        // Render location markers for key quest locations
+        if (this.state.scenario) {
+            this.renderer.renderLocationMarkers(this.state.scenario, this.state.player.position);
         }
 
         // Render UI with time info
@@ -1241,23 +1656,27 @@ export class HistoryRPGGame extends GameEngine {
 
     // Start dialogue with an NPC
     async startDialogue(npcId) {
+        // GUARD: Prevent re-entry if already in dialogue or starting dialogue
+        if (this.state.phase === PHASES.DIALOGUE ||
+            this.state.phase === PHASES.CUTSCENE ||
+            this.state.currentDialogue ||
+            this._startingDialogue) {
+            debugLog(`[HistoryRPG] startDialogue blocked - already in dialogue or starting`);
+            return;
+        }
+
         const npc = this.state.npcs[npcId];
         if (!npc) return;
+
+        // Set flag to prevent race conditions
+        this._startingDialogue = true;
+        debugLog(`[HistoryRPG] Starting dialogue with ${npc.name} (id: ${npcId})`);
 
         // Mark as met in both local state and scenario manager
         const firstMeeting = !npc.met;
         npc.met = true;
         if (this.scenarioManager) {
             this.scenarioManager.meetNPC(npcId);
-        }
-
-        // Check for NPC meet cutscene (only on first meeting)
-        if (firstMeeting && this.cutsceneManager) {
-            this.cutsceneManager.checkTrigger(CUTSCENE_TRIGGERS.NPC_MEET, npcId);
-            // If cutscene started, it will handle its own flow
-            if (this.cutsceneManager.isPlaying()) {
-                return; // Cutscene will end and then we can talk to NPC
-            }
         }
 
         // Set NPC to talk state if using entity manager
@@ -1268,40 +1687,59 @@ export class HistoryRPGGame extends GameEngine {
             }
         }
 
-        // If AI is available, generate dynamic greeting
-        if (this.aiGateway.isAvailable()) {
-            try {
-                const context = {
-                    location: this.state.scenario?.setting || 'the city',
-                    timePeriod: 'World War 2',
-                    situation: 'The city is under siege.',
-                    playerRole: this.state.player.characterType || 'civilian'
-                };
-
-                const response = await this.generationQueue.generateDialogue(
-                    npc,
-                    'Hello',
-                    context
-                );
-
-                this.state.currentDialogue = {
-                    npcId,
-                    npc,
-                    response,
-                    history: []
-                };
-
-                // Start dialogue panel
-                this.dialoguePanel.startDialogue(npc, response);
-                this.state.phase = PHASES.DIALOGUE;
-                debugLog(`[HistoryRPG] Started AI dialogue with ${npc.name}`);
-            } catch (error) {
-                debugLog(`[HistoryRPG] Failed to generate dialogue: ${error.message}`);
-                this.startFallbackDialogue(npc);
-            }
+        // Check if NPC has a pre-generated conversation tree
+        if (this.conversationManager.hasTree(npcId)) {
+            this.startTreeDialogue(npcId, npc);
         } else {
+            // Ambient NPC - use simple fallback dialogue
             this.startFallbackDialogue(npc);
         }
+
+        this._startingDialogue = false;
+    }
+
+    // Start dialogue using pre-generated conversation tree
+    startTreeDialogue(npcId, npc) {
+        // Get conversation from tree
+        const conversation = this.conversationManager.startConversation(
+            npcId,
+            this.state.player.inventory
+        );
+
+        if (!conversation) {
+            debugLog(`[HistoryRPG] Failed to start tree dialogue for ${npcId}`);
+            this.startFallbackDialogue(npc);
+            return;
+        }
+
+        // Format for dialogue panel
+        const response = {
+            speech: conversation.speech,
+            emotion: 'neutral',
+            suggestedChoices: conversation.choices.map(c => ({
+                text: c.text,
+                type: c.type || 'neutral',
+                nodeId: c.nextNode,
+                requiresItem: c.requiresItem,
+                givesItem: c.givesItem,
+                completesObjective: c.completesObjective
+            }))
+        };
+
+        this.state.currentDialogue = {
+            npcId,
+            npc,
+            response,
+            usingTree: true,
+            history: [
+                { speaker: npc.name, text: conversation.speech, isPlayer: false }
+            ]
+        };
+
+        // Start dialogue panel
+        this.dialoguePanel.startDialogue(npc, response);
+        this.state.phase = PHASES.DIALOGUE;
+        debugLog(`[HistoryRPG] Started tree dialogue with ${npc.name}`);
     }
 
     // Fallback dialogue when AI is unavailable
@@ -1316,7 +1754,11 @@ export class HistoryRPGGame extends GameEngine {
             npcId: npc.id,
             npc,
             response,
-            history: []
+            history: [
+                // Include initial greeting in history for context
+                { speaker: npc.name, text: response.speech, isPlayer: false }
+            ],
+            fallbackState: 'greeting' // Track fallback conversation state
         };
 
         // Start dialogue panel
@@ -1375,8 +1817,10 @@ export class HistoryRPGGame extends GameEngine {
 
         const { npc, history } = this.state.currentDialogue;
 
-        // Add to history
-        history.push({ speaker: 'player', text: playerInput });
+        // Add player's response to history BEFORE generating response
+        history.push({ speaker: 'player', text: playerInput, isPlayer: true });
+
+        debugLog(`[HistoryRPG] Continuing dialogue, history length: ${history.length}`);
 
         let response;
 
@@ -1386,7 +1830,8 @@ export class HistoryRPGGame extends GameEngine {
                     location: this.state.scenario?.setting || 'the city',
                     timePeriod: 'World War 2',
                     situation: 'The city is under siege.',
-                    playerRole: this.state.player.characterType || 'civilian'
+                    playerRole: this.state.player.characterType || 'civilian',
+                    history: history // Pass conversation history to AI
                 };
 
                 response = await this.generationQueue.generateDialogue(
@@ -1429,7 +1874,9 @@ export class HistoryRPGGame extends GameEngine {
 
         // Update dialogue state
         this.state.currentDialogue.response = response;
-        history.push({ speaker: npc.name, text: response.speech });
+        history.push({ speaker: npc.name, text: response.speech, isPlayer: false });
+
+        debugLog(`[HistoryRPG] NPC responded: "${response.speech.substring(0, 50)}..."`);
 
         // Update dialogue panel with new response
         this.dialoguePanel.updateDialogue(response);
@@ -1438,17 +1885,36 @@ export class HistoryRPGGame extends GameEngine {
     // Get fallback response when AI is unavailable
     getFallbackResponse(npc, playerInput) {
         const lowerInput = playerInput.toLowerCase();
+        const history = this.state.currentDialogue?.history || [];
+        const historyLength = history.length;
+
+        // Track topics already discussed to avoid repetition
+        const discussedTopics = new Set();
+        for (const entry of history) {
+            const text = entry.text.toLowerCase();
+            if (text.includes('supplies') || text.includes('food')) discussedTopics.add('supplies');
+            if (text.includes('area') || text.includes('dangerous')) discussedTopics.add('area');
+            if (text.includes('escape') || text.includes('tunnel') || text.includes('river')) discussedTopics.add('escape');
+            if (text.includes('safe') || text.includes('shelter')) discussedTopics.add('safety');
+            if (text.includes('soldier') || text.includes('army')) discussedTopics.add('soldiers');
+        }
+
+        debugLog(`[HistoryRPG] Fallback response - history: ${historyLength}, discussed: ${[...discussedTopics].join(', ')}`);
 
         // Simple keyword matching for fallback responses
         if (lowerInput.includes('supplies') || lowerInput.includes('food')) {
             return {
                 speech: `${npc.name} shakes their head. "Supplies are scarce. Everyone is looking for food and water."`,
                 emotion: 'concerned',
-                suggestedChoices: [
-                    { text: "Where might I find some?", type: "neutral" },
-                    { text: "Thank you anyway.", type: "friendly" },
-                    { text: "I should go.", type: "leaving" }
-                ]
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'supplies')
+            };
+        }
+
+        if (lowerInput.includes('where') && lowerInput.includes('find')) {
+            return {
+                speech: `${npc.name} thinks for a moment. "There's an old warehouse to the east. It was bombed, but the basement might still have something. Be careful though."`,
+                emotion: 'helpful',
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'location_hint')
             };
         }
 
@@ -1456,11 +1922,23 @@ export class HistoryRPGGame extends GameEngine {
             return {
                 speech: `${npc.name} looks around warily. "This area is dangerous. The fighting has destroyed most buildings. Stay low and avoid open streets."`,
                 emotion: 'cautious',
-                suggestedChoices: [
-                    { text: "Is there anywhere safe?", type: "neutral" },
-                    { text: "What about the soldiers?", type: "neutral" },
-                    { text: "I should go.", type: "leaving" }
-                ]
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'area')
+            };
+        }
+
+        if (lowerInput.includes('safe') || lowerInput.includes('shelter')) {
+            return {
+                speech: `${npc.name} gestures vaguely. "The cellars are the safest. When the shelling starts, get underground. Some buildings still have intact basements."`,
+                emotion: 'concerned',
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'safety')
+            };
+        }
+
+        if (lowerInput.includes('soldier') || lowerInput.includes('army')) {
+            return {
+                speech: `${npc.name}'s expression darkens. "Both sides are everywhere. Soviet soldiers might help civilians, or they might conscript you. Germans... it depends on the officer."`,
+                emotion: 'wary',
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'soldiers')
             };
         }
 
@@ -1468,20 +1946,86 @@ export class HistoryRPGGame extends GameEngine {
             return {
                 speech: `${npc.name} lowers their voice. "The river might be a way out, but it's heavily watched. I've heard rumors of tunnels, but I don't know where."`,
                 emotion: 'secretive',
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'escape')
+            };
+        }
+
+        if (lowerInput.includes('tunnel')) {
+            return {
+                speech: `${npc.name} shrugs. "I've only heard whispers. They say the old factory district has passages underneath. Built before the war for something."`,
+                emotion: 'uncertain',
+                suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'tunnels')
+            };
+        }
+
+        if (lowerInput.includes('thank')) {
+            return {
+                speech: `${npc.name} gives a small nod. "Stay safe out there. These days, that's all any of us can do."`,
+                emotion: 'neutral',
                 suggestedChoices: [
-                    { text: "Who would know about the tunnels?", type: "neutral" },
-                    { text: "Thank you for the information.", type: "friendly" },
+                    { text: "You too. Take care.", type: "friendly" },
                     { text: "I should go.", type: "leaving" }
                 ]
             };
         }
 
-        // Default response
+        // Default response - varies based on how long conversation has been
+        if (historyLength > 4) {
+            return {
+                speech: `${npc.name} seems to grow restless. "I've told you what I know. Is there something else?"`,
+                emotion: 'impatient',
+                suggestedChoices: [
+                    { text: "No, thank you for your help.", type: "friendly" },
+                    { text: "I should go.", type: "leaving" }
+                ]
+            };
+        }
+
         return {
-            speech: `${npc.name} nods slowly. "Times are hard for everyone. We do what we can to survive."`,
+            speech: `${npc.name} considers your words. "I understand. We're all just trying to survive."`,
             emotion: 'neutral',
-            suggestedChoices: this.getFallbackChoices(npc)
+            suggestedChoices: this.getContextualChoices(npc, discussedTopics, 'default')
         };
+    }
+
+    // Get contextual choices based on what's been discussed
+    getContextualChoices(npc, discussedTopics, currentTopic) {
+        const choices = [];
+
+        // Add undiscussed topics as options
+        if (!discussedTopics.has('supplies') && currentTopic !== 'supplies') {
+            choices.push({ text: "Do you know where I can find supplies?", type: "neutral" });
+        }
+        if (!discussedTopics.has('area') && currentTopic !== 'area') {
+            choices.push({ text: "What can you tell me about this area?", type: "neutral" });
+        }
+        if (!discussedTopics.has('escape') && currentTopic !== 'escape') {
+            choices.push({ text: "Is there a way out of the city?", type: "neutral" });
+        }
+        if (!discussedTopics.has('safety') && currentTopic !== 'safety') {
+            choices.push({ text: "Is there anywhere safe?", type: "neutral" });
+        }
+        if (!discussedTopics.has('soldiers') && currentTopic !== 'soldiers' && choices.length < 3) {
+            choices.push({ text: "What about the soldiers?", type: "neutral" });
+        }
+
+        // If we've discussed most topics, offer follow-ups based on current topic
+        if (choices.length === 0) {
+            if (currentTopic === 'escape' || currentTopic === 'tunnels') {
+                choices.push({ text: "Who might know more about the tunnels?", type: "neutral" });
+            }
+            if (currentTopic === 'supplies' || currentTopic === 'location_hint') {
+                choices.push({ text: "Thank you, that's helpful.", type: "friendly" });
+            }
+        }
+
+        // Always add leaving option
+        if (choices.length < 3) {
+            choices.push({ text: "Thank you for your help.", type: "friendly" });
+        }
+        choices.push({ text: "I should go.", type: "leaving" });
+
+        return choices.slice(0, 4); // Max 4 choices
     }
 
     // End current dialogue

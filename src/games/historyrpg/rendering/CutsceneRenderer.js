@@ -201,6 +201,8 @@ export class CutsceneRenderer {
     nextFrame() {
         if (!this.currentCutscene) return;
 
+        debugLog(`[CutsceneRenderer] Advancing from frame ${this.currentFrame + 1}/${this.currentCutscene.frames.length}`);
+
         // Start fade out
         this.fadeDirection = 1;
 
@@ -216,6 +218,10 @@ export class CutsceneRenderer {
                 if (this.onFrameChange) {
                     this.onFrameChange(this.currentFrame);
                 }
+            } else {
+                // Past last frame - end the cutscene
+                debugLog(`[CutsceneRenderer] Last frame completed, ending cutscene`);
+                this.endCutscene();
             }
         }, 500);
     }
@@ -224,6 +230,7 @@ export class CutsceneRenderer {
     skip() {
         if (!this.currentCutscene) return;
 
+        debugLog(`[CutsceneRenderer] Skipping cutscene: ${this.currentCutscene.title || 'Untitled'}`);
         this.fadeDirection = 1;
         this.currentFrame = this.currentCutscene.frames.length;
     }
@@ -635,14 +642,17 @@ export class CutsceneRenderer {
             // If text still revealing, complete it
             const frame = this.getCurrentFrame();
             if (frame?.text && this.textRevealIndex < frame.text.length) {
+                debugLog(`[CutsceneRenderer] User skipped text reveal`);
                 this.textRevealIndex = frame.text.length;
             } else {
+                debugLog(`[CutsceneRenderer] User pressed ${key === ' ' ? 'SPACE' : 'ENTER'} to advance`);
                 this.nextFrame();
             }
             return true;
         }
 
         if (key === 'Escape') {
+            debugLog(`[CutsceneRenderer] User pressed ESC to skip cutscene`);
             this.skip();
             return true;
         }

@@ -2,30 +2,38 @@
 
 import { GameRegistry } from '../GameRegistry.js';
 import { HistoryRPGGame } from './HistoryRPGGame.js';
-import { getInitialState, SCENARIOS } from './config.js';
+import { getInitialState } from './config.js';
 
 GameRegistry.register('historyrpg', {
     name: 'History RPG',
-    description: 'AI-generated historical open-world RPG. Explore Stalingrad, make choices, and try to change history.',
+    description: 'AI-generated historical open-world RPG. Pick a time and place, and the AI creates a complete adventure.',
     minPlayers: 1,
     maxPlayers: 4,
     icon: '📜',
     gameClass: HistoryRPGGame,
     getInitialState,
     supportsAI: false,  // AI-generated content, not AI players
+    hasLoadingScreen: true,  // Game has its own loading screen for scenario generation
     settings: [
         {
-            id: 'scenarioId',
-            label: 'Scenario',
-            type: 'enum',
-            options: Object.values(SCENARIOS).map(s => s.name),
-            default: 'Battle of Stalingrad'
+            id: 'location',
+            label: 'Historical Location',
+            type: 'string',
+            default: 'Stalingrad, Soviet Union',
+            placeholder: 'e.g., Berlin, Rome, London'
+        },
+        {
+            id: 'date',
+            label: 'Date',
+            type: 'string',
+            default: 'January 1, 1943',
+            placeholder: 'e.g., July 4, 1776'
         },
         {
             id: 'characterType',
             label: 'Character Type',
             type: 'enum',
-            options: ['Civilian', 'Soldier', 'Medic', 'Resistance'],
+            options: ['Civilian', 'Soldier', 'Medic', 'Resistance', 'Spy', 'Merchant'],
             default: 'Civilian'
         },
         {
@@ -37,7 +45,7 @@ GameRegistry.register('historyrpg', {
         },
         {
             id: 'apiKey',
-            label: 'API Key (optional)',
+            label: 'API Key (required)',
             type: 'string',
             default: ''
         }

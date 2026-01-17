@@ -296,11 +296,15 @@ async function init() {
         return;
     }
 
-    showStatus('Preparing game...');
-
     try {
         // Check if we should skip waiting for connection
         const gameConfig = GameRegistry.getGame(gameType);
+
+        // Show status unless game has its own loading screen
+        if (!gameConfig?.hasLoadingScreen) {
+            showStatus('Preparing game...');
+        }
+
         const supportsAI = gameConfig?.supportsAI === true;
         const minPlayers = gameConfig?.minPlayers || 2;
         const connectedHumans = parseInt(gameSettings.connectedHumans) || 1;
