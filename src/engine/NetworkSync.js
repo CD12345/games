@@ -53,12 +53,13 @@ export class NetworkSync {
                 }
             });
         } else {
-            // Host: Subscribe to input updates from guest
-            this.inputsUnsubscribe = subscribeToInputs(this.gameCode, (input) => {
+            // Host: Subscribe to input updates from guests
+            this.inputsUnsubscribe = subscribeToInputs(this.gameCode, (input, fromPeerId) => {
                 if (input) {
                     this.remoteInput = input;
                     if (this.onInputUpdate) {
-                        this.onInputUpdate(input);
+                        // Pass along the sender's peerId so host can identify which guest sent it
+                        this.onInputUpdate(input, fromPeerId);
                     }
                 }
             });

@@ -4,6 +4,7 @@ import { GameEngine } from '../../engine/GameEngine.js';
 import { InputManager } from '../../engine/InputManager.js';
 import { NetworkSync } from '../../engine/NetworkSync.js';
 import { onMessage, offMessage, sendMessage } from '../../core/peer.js';
+import { getPlayerNumberForPeer } from '../../core/gameSession.js';
 import { LiquidWarRenderer } from './LiquidWarRenderer.js';
 import { debugLog, debugSetValue } from '../../ui/DebugOverlay.js';
 import {
@@ -140,18 +141,28 @@ export class LiquidWarGame extends GameEngine {
 
         // Set up network callbacks
         if (this.isHost) {
-            this.network.onInputUpdate = (input) => {
-                // Guest sends their cursor position (p2)
+            this.network.onInputUpdate = (input, fromPeerId) => {
+                // Guest sends their cursor position
                 if (input?.cursorX !== undefined && input?.cursorY !== undefined) {
-                    // If p2 was AI but now a human connected, switch them to human
-                    if (this.aiPlayers.has('p2')) {
-                        debugLog('Human player connected as p2, removing AI control');
-                        this.aiPlayers.delete('p2');
-                        this.humanPlayers.add('p2');
-                        delete this.state.aiPlayers['p2'];
-                        delete this.aiState['p2'];
+                    // Look up which player this peer is
+                    const playerNumber = getPlayerNumberForPeer(fromPeerId);
+                    if (!playerNumber) {
+                        debugLog(`Unknown peer sending input: ${fromPeerId}`);
+                        return;
                     }
-                    this.state.cursors.p2 = {
+
+                    const playerId = `p${playerNumber}`;
+
+                    // If this player was AI but now a human connected, switch them to human
+                    if (this.aiPlayers.has(playerId)) {
+                        debugLog(`Human player connected as ${playerId}, removing AI control`);
+                        this.aiPlayers.delete(playerId);
+                        this.humanPlayers.add(playerId);
+                        delete this.state.aiPlayers[playerId];
+                        delete this.aiState[playerId];
+                    }
+
+                    this.state.cursors[playerId] = {
                         x: input.cursorX,
                         y: input.cursorY,
                     };

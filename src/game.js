@@ -335,7 +335,8 @@ async function init() {
 
         await connectForGame(gameCode, isHost, skipConnectionWait);
 
-        const playerNumber = isHost ? 1 : 2;
+        // Get player number from session (host=1, guests get assigned 2, 3, 4, etc.)
+        const playerNumber = parseInt(sessionStorage.getItem('playerNumber')) || (isHost ? 1 : 2);
 
         // Get game class
         const GameClass = GameRegistry.getGameClass(gameType);

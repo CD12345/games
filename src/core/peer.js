@@ -1,15 +1,19 @@
 // PeerJS P2P connection management
 // Uses PeerJS for WebRTC peer-to-peer connections
+// Supports multiple guest connections for multiplayer games
 
 // PeerJS is loaded from CDN in HTML
 
 import { debugLog as overlayDebugLog } from '../ui/DebugOverlay.js';
 
 let peer = null;
-let currentConnection = null;
+let connections = new Map();  // Map of peerId -> connection
+let hostConnection = null;    // For guests: connection to host
 let isHost = false;
 let messageHandlers = new Map();
 let connectionHandler = null;
+let onGuestConnectCallback = null;
+let onGuestDisconnectCallback = null;
 
 // Debug log for connection troubleshooting
 const debugLog = [];
@@ -121,37 +125,72 @@ export async function initPeer(customId = null) {
     });
 }
 
-// Host: Wait for a guest to connect
+// Host: Start listening for guest connections (resolves on first connection)
 export function waitForConnection() {
     return new Promise((resolve) => {
         isHost = true;
-        addDebugLog('Host waiting for guest connection...');
+        addDebugLog('Host waiting for guest connections...');
 
-        if (currentConnection && currentConnection.open) {
-            addDebugLog('Reusing existing open connection');
-            resolve(currentConnection);
-            return;
+        // If we already have connections, resolve with the first one
+        if (connections.size > 0) {
+            const firstConn = connections.values().next().value;
+            if (firstConn && firstConn.open) {
+                addDebugLog('Reusing existing open connection');
+                resolve(firstConn);
+                return;
+            }
         }
 
         clearConnectionHandler();
+        let firstConnectionResolved = false;
+
         connectionHandler = (conn) => {
             addDebugLog(`Guest connecting: ${conn.peer}`);
-            currentConnection = conn;
-            setupConnection(conn);
 
             conn.on('open', () => {
-                addDebugLog('Guest connection OPEN');
-                resolve(conn);
+                addDebugLog(`Guest connection OPEN: ${conn.peer}`);
+                connections.set(conn.peer, conn);
+                setupHostConnection(conn);
+
+                // Notify callback about new guest
+                if (onGuestConnectCallback) {
+                    onGuestConnectCallback(conn.peer, connections.size);
+                }
+
+                // Resolve promise on first connection
+                if (!firstConnectionResolved) {
+                    firstConnectionResolved = true;
+                    resolve(conn);
+                }
             });
 
-            // If already open, resolve immediately
+            // If already open, handle immediately
             if (conn.open) {
-                addDebugLog('Guest connection already open');
-                resolve(conn);
+                addDebugLog(`Guest connection already open: ${conn.peer}`);
+                connections.set(conn.peer, conn);
+                setupHostConnection(conn);
+
+                if (onGuestConnectCallback) {
+                    onGuestConnectCallback(conn.peer, connections.size);
+                }
+
+                if (!firstConnectionResolved) {
+                    firstConnectionResolved = true;
+                    resolve(conn);
+                }
             }
         };
         peer.on('connection', connectionHandler);
     });
+}
+
+// Set callback for when guests connect/disconnect (host only)
+export function onGuestConnect(callback) {
+    onGuestConnectCallback = callback;
+}
+
+export function onGuestDisconnect(callback) {
+    onGuestDisconnectCallback = callback;
 }
 
 // Guest: Connect to a host
@@ -190,8 +229,8 @@ export function connectToPeer(hostId) {
         conn.on('open', () => {
             addDebugLog('Connection OPEN to host');
             clearInterval(checkIceState);
-            currentConnection = conn;
-            setupConnection(conn);
+            hostConnection = conn;
+            setupGuestConnection(conn);
             resolve(conn);
         });
 
@@ -203,7 +242,7 @@ export function connectToPeer(hostId) {
 
         // Timeout after 20 seconds (increased for slow TURN negotiation)
         setTimeout(() => {
-            if (!currentConnection) {
+            if (!hostConnection) {
                 addDebugLog('Connection TIMEOUT after 20s');
                 clearInterval(checkIceState);
                 reject(new Error('Connection timeout. Game may not exist.'));
@@ -212,18 +251,43 @@ export function connectToPeer(hostId) {
     });
 }
 
-// Set up connection event handlers
-function setupConnection(conn) {
+// Set up connection handlers for host (receiving from a guest)
+function setupHostConnection(conn) {
     conn.on('data', (data) => {
-        handleMessage(data);
+        // Include sender info in the message
+        handleMessage(data, conn.peer);
     });
 
     conn.on('close', () => {
-        console.log('Connection closed');
-        currentConnection = null;
+        addDebugLog(`Guest disconnected: ${conn.peer}`);
+        connections.delete(conn.peer);
+
+        if (onGuestDisconnectCallback) {
+            onGuestDisconnectCallback(conn.peer, connections.size);
+        }
+
         // Notify handlers
         const handler = messageHandlers.get('_disconnect');
-        if (handler) handler();
+        if (handler) handler({ peerId: conn.peer });
+    });
+
+    conn.on('error', (err) => {
+        console.error('Connection error:', err);
+    });
+}
+
+// Set up connection handlers for guest (receiving from host)
+function setupGuestConnection(conn) {
+    conn.on('data', (data) => {
+        handleMessage(data, null);  // null = from host
+    });
+
+    conn.on('close', () => {
+        console.log('Connection to host closed');
+        hostConnection = null;
+        // Notify handlers
+        const handler = messageHandlers.get('_disconnect');
+        if (handler) handler({ peerId: null });
     });
 
     conn.on('error', (err) => {
@@ -232,11 +296,12 @@ function setupConnection(conn) {
 }
 
 // Handle incoming messages
-function handleMessage(data) {
+function handleMessage(data, fromPeerId) {
     if (data && data.type) {
         const handler = messageHandlers.get(data.type);
         if (handler) {
-            handler(data.payload);
+            // Include sender info in payload for host to identify which guest sent it
+            handler(data.payload, fromPeerId);
         }
     }
 }
@@ -251,10 +316,29 @@ export function offMessage(type) {
     messageHandlers.delete(type);
 }
 
-// Send a message to the connected peer
+// Send a message (host broadcasts to all guests, guest sends to host)
 export function sendMessage(type, payload) {
-    if (currentConnection && currentConnection.open) {
-        currentConnection.send({ type, payload });
+    if (isHost) {
+        // Broadcast to all connected guests
+        for (const conn of connections.values()) {
+            if (conn.open) {
+                conn.send({ type, payload });
+            }
+        }
+    } else {
+        // Send to host
+        if (hostConnection && hostConnection.open) {
+            hostConnection.send({ type, payload });
+        }
+    }
+}
+
+// Send a message to a specific peer (host only)
+export function sendMessageTo(peerId, type, payload) {
+    if (!isHost) return;
+    const conn = connections.get(peerId);
+    if (conn && conn.open) {
+        conn.send({ type, payload });
     }
 }
 
@@ -276,9 +360,22 @@ export function sendRequest(type, payload, responseType, timeout = 5000) {
     });
 }
 
-// Check if connected
+// Check if connected (host: has any guests, guest: connected to host)
 export function isConnected() {
-    return currentConnection && currentConnection.open;
+    if (isHost) {
+        return connections.size > 0;
+    }
+    return hostConnection && hostConnection.open;
+}
+
+// Get number of connected guests (host only)
+export function getGuestCount() {
+    return connections.size;
+}
+
+// Get list of connected guest peer IDs (host only)
+export function getGuestPeerIds() {
+    return Array.from(connections.keys());
 }
 
 // Check if this peer is the host
@@ -301,11 +398,23 @@ export function getLatency() {
 // Disconnect and cleanup
 export function disconnect(options = {}) {
     const keepPeer = options.keepPeer === true;
-    if (currentConnection) {
-        currentConnection.close();
-        currentConnection = null;
+
+    // Close all guest connections (host)
+    for (const conn of connections.values()) {
+        conn.close();
     }
+    connections.clear();
+
+    // Close host connection (guest)
+    if (hostConnection) {
+        hostConnection.close();
+        hostConnection = null;
+    }
+
     clearConnectionHandler();
+    onGuestConnectCallback = null;
+    onGuestDisconnectCallback = null;
+
     if (peer && !keepPeer) {
         peer.destroy();
         peer = null;

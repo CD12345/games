@@ -1,16 +1,21 @@
 // Game session management using PeerJS P2P connections
+// Supports multiple guests with unique player numbers
 
 import {
     initPeer,
     waitForConnection,
     connectToPeer,
     sendMessage,
+    sendMessageTo,
     onMessage,
     offMessage,
     isConnected,
     getIsHost,
     getPeerId,
-    disconnect
+    disconnect,
+    onGuestConnect,
+    onGuestDisconnect,
+    getGuestPeerIds
 } from './peer.js';
 import { generateCode, isValidCodeFormat, normalizeCode } from './codeGenerator.js';
 import { GameRegistry } from '../games/GameRegistry.js';
@@ -19,6 +24,10 @@ import { GameRegistry } from '../games/GameRegistry.js';
 let currentSession = null;
 let playerUpdateCallback = null;
 let gameStatusCallback = null;
+
+// Map of peerId -> playerNumber (host only)
+let peerPlayerMap = new Map();
+let nextPlayerNumber = 2;  // Host is always player 1
 
 // Create a new game session (as host)
 export async function createGame(gameType, playerName, options = {}) {
@@ -30,6 +39,10 @@ export async function createGame(gameType, playerName, options = {}) {
     const existingCode = sessionStorage.getItem('pairCode');
     const existingHost = sessionStorage.getItem('pairIsHost') === 'true';
     const preferredCode = options.code || null;
+
+    // Reset player tracking
+    peerPlayerMap.clear();
+    nextPlayerNumber = 2;
 
     // Generate a unique code and use it as the peer ID (reuse session code when linked)
     let code = null;
@@ -88,18 +101,22 @@ export async function createGame(gameType, playerName, options = {}) {
         code,
         gameType,
         isHost: true,
+        playerNumber: 1,  // Host is always player 1
         status: 'waiting',
         players: {
-            host: {
+            p1: {
                 name: hostName,
+                peerId: code,
                 connected: true,
-                isHost: true
+                isHost: true,
+                playerNumber: 1
             }
         }
     };
 
     sessionStorage.setItem('pairCode', code);
     sessionStorage.setItem('pairIsHost', 'true');
+    sessionStorage.setItem('playerNumber', '1');
 
     // Wait for guest to connect
     setupHostListeners();
@@ -107,7 +124,8 @@ export async function createGame(gameType, playerName, options = {}) {
     return {
         code,
         gameType,
-        isHost: true
+        isHost: true,
+        playerNumber: 1
     };
 }
 
@@ -119,13 +137,13 @@ export async function joinGame(code, playerName) {
     }
 
     // Initialize our peer (with random ID)
-    await initPeer();
+    const peerId = await initPeer();
 
     // Connect to the host
     await connectToPeer(code);
 
     // Request game info from host
-    sendMessage('join_request', { name: playerName || 'Player 2' });
+    sendMessage('join_request', { name: playerName || 'Player', peerId });
 
     // Wait for acceptance
     return new Promise((resolve, reject) => {
@@ -140,16 +158,20 @@ export async function joinGame(code, playerName) {
             offMessage('join_accepted');
             offMessage('join_rejected');
 
+            const playerNumber = data.playerNumber;
+
             currentSession = {
                 code,
                 gameType: data.gameType,
                 isHost: false,
+                playerNumber,
                 status: 'waiting',
                 players: data.players
             };
 
             sessionStorage.setItem('pairCode', code);
             sessionStorage.setItem('pairIsHost', 'false');
+            sessionStorage.setItem('playerNumber', String(playerNumber));
             sessionStorage.setItem('sessionLinked', 'true');
 
             setupGuestListeners();
@@ -157,7 +179,8 @@ export async function joinGame(code, playerName) {
             resolve({
                 code,
                 gameType: data.gameType,
-                isHost: false
+                isHost: false,
+                playerNumber
             });
         });
 
@@ -172,21 +195,45 @@ export async function joinGame(code, playerName) {
 
 // Host: Set up listeners for guest actions
 function setupHostListeners() {
-    onMessage('join_request', (data) => {
-        // Accept the guest
-        currentSession.players.guest = {
-            name: data.name || 'Player 2',
+    // Handle join requests - now includes fromPeerId
+    onMessage('join_request', (data, fromPeerId) => {
+        const gameConfig = GameRegistry.getGame(currentSession.gameType);
+        const maxPlayers = gameConfig?.maxPlayers || 6;
+
+        // Check if we have room for more players
+        const currentPlayerCount = Object.keys(currentSession.players).length;
+        if (currentPlayerCount >= maxPlayers) {
+            sendMessageTo(fromPeerId, 'join_rejected', { reason: 'Game is full' });
+            return;
+        }
+
+        // Assign player number
+        const playerNumber = nextPlayerNumber++;
+        const playerId = `p${playerNumber}`;
+
+        // Track peer -> player mapping
+        peerPlayerMap.set(fromPeerId, playerNumber);
+
+        // Add to players list
+        currentSession.players[playerId] = {
+            name: data.name || `Player ${playerNumber}`,
+            peerId: fromPeerId,
             connected: true,
-            isHost: false
+            isHost: false,
+            playerNumber
         };
 
         sessionStorage.setItem('sessionLinked', 'true');
 
-        // Send acceptance with game info
-        sendMessage('join_accepted', {
+        // Send acceptance with player number to this specific guest
+        sendMessageTo(fromPeerId, 'join_accepted', {
             gameType: currentSession.gameType,
-            players: currentSession.players
+            players: currentSession.players,
+            playerNumber
         });
+
+        // Broadcast updated player list to all guests
+        sendMessage('players_update', currentSession.players);
 
         // Notify local UI
         if (playerUpdateCallback) {
@@ -194,12 +241,25 @@ function setupHostListeners() {
         }
     });
 
-    onMessage('_disconnect', () => {
-        if (currentSession?.players?.guest) {
-            currentSession.players.guest.connected = false;
-            if (playerUpdateCallback) {
-                playerUpdateCallback(currentSession.players);
+    // Handle disconnections - now includes peerId info
+    onMessage('_disconnect', (data) => {
+        const peerId = data?.peerId;
+        if (!peerId) return;
+
+        const playerNumber = peerPlayerMap.get(peerId);
+        if (playerNumber) {
+            const playerId = `p${playerNumber}`;
+            if (currentSession?.players?.[playerId]) {
+                currentSession.players[playerId].connected = false;
+
+                // Broadcast updated player list
+                sendMessage('players_update', currentSession.players);
+
+                if (playerUpdateCallback) {
+                    playerUpdateCallback(currentSession.players);
+                }
             }
+            peerPlayerMap.delete(peerId);
         }
     });
 }
@@ -238,6 +298,8 @@ export function leaveGame(options = {}) {
     currentSession = null;
     playerUpdateCallback = null;
     gameStatusCallback = null;
+    peerPlayerMap.clear();
+    nextPlayerNumber = 2;
 }
 
 // Start the game (host only)
@@ -262,7 +324,7 @@ export async function startGame(code, settings = {}) {
     currentSession.initialState = initialState;
     currentSession.settings = settings;
 
-    // Notify guest
+    // Notify all guests
     sendMessage('game_start', { initialState, settings });
 
     // Notify local callback
@@ -308,7 +370,7 @@ export function subscribeToInputs(code, callback) {
     return () => offMessage('input_update');
 }
 
-// Send game state update (host -> guest)
+// Send game state update (host -> guests)
 export function sendStateUpdate(state) {
     sendMessage('state_update', state);
 }
@@ -321,6 +383,16 @@ export function sendInputUpdate(input) {
 // Get current session info
 export function getCurrentSession() {
     return currentSession;
+}
+
+// Get player number for this client
+export function getPlayerNumber() {
+    return currentSession?.playerNumber || parseInt(sessionStorage.getItem('playerNumber')) || 1;
+}
+
+// Get player number for a peer ID (host only)
+export function getPlayerNumberForPeer(peerId) {
+    return peerPlayerMap.get(peerId) || null;
 }
 
 // Check if user is host
