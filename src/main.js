@@ -95,6 +95,7 @@ let currentScreen = 'mainMenu';
 let currentGameCode = null;
 let currentGameType = null;
 let isHost = false;
+let localPlayerNumber = 1;  // Track our player number (host=1, guests=2,3,4...)
 let playersUnsubscribe = null;
 let gameUnsubscribe = null;
 let pendingOffer = null;
@@ -517,6 +518,7 @@ function handleNewSession() {
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
+    localPlayerNumber = 1;
     resetGameSelection();
     setMenuCodeDisplay('');
     if (elements.joinCode) {
@@ -988,6 +990,7 @@ async function handleCreateGame(gameType, options = {}) {
         const result = await createGameWithRetries(gameType, getEffectivePlayerName(), preferredCode);
         currentGameCode = result.code;
         isHost = result.isHost;
+        localPlayerNumber = 1;  // Host is always player 1
         setMenuCodeDisplay(currentGameCode);
         enterLobby(gameType);
         clearJoinOffer();
@@ -1011,6 +1014,7 @@ async function handleJoinGame() {
         const result = await joinGame(code, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
+        localPlayerNumber = result.playerNumber || (isHost ? 1 : 2);
         setMenuCodeDisplay(currentGameCode);
         enterLobby(result.gameType);
         clearJoinOffer();
@@ -1039,6 +1043,7 @@ async function handleJoinOffer() {
         const result = await joinGame(offerCode, getEffectivePlayerName());
         currentGameCode = result.code;
         isHost = result.isHost;
+        localPlayerNumber = result.playerNumber || (isHost ? 1 : 2);
         setMenuCodeDisplay(currentGameCode);
         enterLobby(result.gameType);
         clearJoinOffer();
@@ -1110,8 +1115,8 @@ function updatePlayerList(players) {
         const div = document.createElement('div');
         div.className = `player-item${player.isHost ? ' host' : ''}`;
 
-        // Mark our own entry
-        const isYou = (player.isHost && isHost) || (!player.isHost && !isHost);
+        // Mark our own entry based on player number
+        const isYou = player.playerNumber === localPlayerNumber;
         const nameText = `${player.name}${isYou ? ' (You)' : ''}`;
 
         div.innerHTML = `
@@ -1234,6 +1239,7 @@ function handleLeaveLobby(notifyPeer = true) {
     currentGameCode = null;
     currentGameType = null;
     isHost = false;
+    localPlayerNumber = 1;
     resetGameSelection();
     if (!keepPeer) {
         setMenuCodeDisplay('');
